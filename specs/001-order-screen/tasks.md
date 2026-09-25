@@ -78,7 +78,7 @@ already applied and the next cut-lines are in plan.md §12. Status: **READY FOR 
 - **Depends on:** B8
 - **DoD:** request-approval with 7.25% line → `pending_approval`, line `pending`; with no blocked lines → 422 `NO_LINES_NEED_APPROVAL`; owner approve with matching `expectedTerms` → line `approved`, order auto-returns to `draft` when nothing pending; adviser then saves → totals `{549000, 45018000}` (**AC1 full**); stale `expectedTerms` → 409 `LINE_TERMS_CHANGED`; decision on non-pending line → 409 `LINE_NOT_PENDING`; adviser calling decision → 403 (AC5); reject → line `rejected`, save → 422; AC6: approve → PUT discount 15,000→15,100 → line `state:'blocked'`, `approval.status:'none'` → save 422; withdraw → `draft`, pending lines → `none`.
 
-### [ ] B10 — AC2 curl proof script  `backend`  (AC2b)
+### [x] B10 — AC2 curl proof script  `backend`  (AC2b)
 - **Goal:** `scripts/prove-server-refusal.sh` (bash, needs `curl` + `node` for JSON parsing — no `jq` dependency).
 - **Files:** `scripts/prove-server-refusal.sh`.
 - **Depends on:** B9
