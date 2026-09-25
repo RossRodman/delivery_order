@@ -36,7 +36,7 @@ already applied and the next cut-lines are in plan.md §12. Status: **READY FOR 
 - **Depends on:** B1
 - **DoD:** schemas for `OrderInput`, decision body, price body, global-rate body, demo-login body; response types `OrderView`, `LineView`, `OrderSummary`, `Catalog`, `PriceChange`; unit tests: unknown keys stripped (`role`, `unitPriceCents`, `createdBy`), qty 0 / 10,001 rejected, 51 lines rejected, duplicate line ids rejected, rate 7,999 **passes zod** (domain rejects it with its own code).
 
-### [ ] B3 — DB schema, migrations and guards  `backend`  (R1, R2, R4, R5, R7, R8, R9; AC2c, AC4)
+### [x] B3 — DB schema, migrations and guards  `backend`  (R1, R2, R4, R5, R7, R8, R9; AC2c, AC4)
 - **Goal:** tables (plan §4.1) and triggers (plan §4.2).
 - **Files:** `src/server/db/schema.ts`, `src/server/db/client.ts` (postgres-js singleton, `prepare:false`), `drizzle.config.ts`, `drizzle/0000_*.sql`, `drizzle/0001_guards.sql`, `src/server/db/seed-data.ts` (fixed UUIDs) + `src/server/db/seed.ts` (exports `seed(db)`, idempotent) (m-2), `tests/helpers/db.ts` (migrate/truncate/seed helpers), `tests/integration/global-setup.ts`, `tests/integration/db-guards.int.test.ts`.
 - **Depends on:** B0
