@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { computeOrder, type ComputedOrder, type LineApproval } from "@/domain";
+import { computeOrder, formatUsd, type ComputedOrder, type LineApproval } from "@/domain";
 import { api } from "@/client/api";
 import type { Catalog, LineView, OrderInput, OrderView, PriceChange } from "@/contracts/api";
 import type { ApiError } from "@/client/api";
@@ -11,6 +11,7 @@ import { saveLocalInput } from "@/client/offline/orders";
 import { enqueue } from "@/client/offline/outbox";
 import { onSyncChange } from "@/client/offline/sync";
 import { useOnline } from "@/client/offline/useOnline";
+import { useToast } from "@/components/Toast";
 
 export interface EditableLine {
   id: string;
@@ -20,6 +21,13 @@ export interface EditableLine {
   approval: LineApproval;
 }
 
+/** `computeOrder`'s result plus the lines it had to exclude because they no longer price validly. */
+export interface UseOrderComputed extends ComputedOrder {
+  /** Line ids whose discount now exceeds the (possibly changed) line value — never fed to the
+   *  domain module, which would throw; shown as an error row instead (review M-2). */
+  invalidLineIds: string[];
+}
+
 export interface UseOrderState {
   loading: boolean;
   catalog: Catalog | null;
@@ -27,7 +35,7 @@ export interface UseOrderState {
   dealerId: string;
   rate: number;
   lines: EditableLine[];
-  computed: ComputedOrder | null;
+  computed: UseOrderComputed | null;
   saving: boolean;
   error: ApiError | null;
   priceChanges: PriceChange[];
@@ -51,6 +59,7 @@ export function useOrder(orderId: string, meId: string | null) {
   const isNewOrderRef = useRef(true);
   const autosaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { isOnline, syncNow } = useOnline();
+  const { show } = useToast();
 
   const refreshQueuedIntent = useCallback(async () => {
     const entry = await getOutboxEntry(orderId);
@@ -60,23 +69,40 @@ export function useOrder(orderId: string, meId: string | null) {
   useEffect(() => {
     let cancelled = false;
     async function load() {
+      // The signed-in user isn't known yet (useMe still resolving) — wait rather than fetch
+      // under the wrong identity or write a local copy with no owner (review M-1).
+      if (!meId) return;
       setLoading(true);
       const catalogData = await loadCatalog();
       if (cancelled) return;
       if (catalogData) setCatalog(catalogData);
+
+      // Review m-6: a local copy that hasn't synced yet (queued save, or a save the server
+      // rejected) wins over a fresh server read — the adviser's edits and the refusal are never
+      // silently replaced by stale server data just because reopening the page happened to be
+      // online.
+      const localFirst = await getLocalOrder(orderId);
+      if (localFirst && localFirst.userId === meId && localFirst.syncState !== "synced") {
+        isNewOrderRef.current = !localFirst.server;
+        applyLocalInput(localFirst.input, localFirst.server ?? undefined);
+        if (localFirst.lastError) setError(localFirst.lastError);
+        await refreshQueuedIntent();
+        setLoading(false);
+        return;
+      }
 
       const orderResult = await api.getOrder(orderId);
       if (cancelled) return;
       if (orderResult.ok) {
         isNewOrderRef.current = false;
         applyServerOrder(orderResult.data);
-        await saveLocalInput(orderId, inputFromView(orderResult.data), {
+        await saveLocalInput(orderId, inputFromView(orderResult.data), meId, {
           server: orderResult.data,
           syncState: "synced",
         });
       } else if (orderResult.error.code === "NETWORK") {
-        // Offline: fall back to whatever we have cached for this order.
-        const local = await getLocalOrder(orderId);
+        // Offline: fall back to whatever we have cached for this order (only this user's copy).
+        const local = localFirst && localFirst.userId === meId ? localFirst : undefined;
         if (local) {
           isNewOrderRef.current = !local.server;
           applyLocalInput(local.input, local.server ?? undefined);
@@ -96,7 +122,7 @@ export function useOrder(orderId: string, meId: string | null) {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orderId]);
+  }, [orderId, meId]);
 
   useEffect(() => {
     // The sync engine (F7) runs in the background (online event / app start / manual "Sync
@@ -106,7 +132,7 @@ export function useOrder(orderId: string, meId: string | null) {
     return onSyncChange(() => {
       refreshQueuedIntent();
       getLocalOrder(orderId).then((local) => {
-        if (!local) return;
+        if (!local || local.userId !== meId) return;
         if (local.syncState === "synced" && local.server) {
           applyServerOrder(local.server);
           setPriceChanges(local.priceChanges);
@@ -117,13 +143,19 @@ export function useOrder(orderId: string, meId: string | null) {
       });
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orderId]);
+  }, [orderId, meId]);
 
   function inputFromView(view: OrderView): OrderInput {
     return {
       dealerId: view.dealer.id,
       rate: view.rate,
-      lines: view.lines.map((l) => ({ id: l.id, productId: l.product.id, qty: l.qty, discountCents: l.discountCents })),
+      lines: view.lines.map((l) => ({
+        id: l.id,
+        productId: l.product.id,
+        qty: l.qty,
+        discountCents: l.discountCents,
+        clientUnitPriceCents: l.unitPriceCents,
+      })),
     };
   }
 
@@ -150,7 +182,7 @@ export function useOrder(orderId: string, meId: string | null) {
     };
   }
 
-  /** Applies a cached OrderInput (offline reopen). `serverSnapshot`, if any, seeds approvals. */
+  /** Applies a cached OrderInput (offline reopen, or m-6 unsynced-edits-win). `serverSnapshot`, if any, seeds approvals. */
   function applyLocalInput(input: OrderInput, serverSnapshot?: OrderView) {
     setServer(serverSnapshot ?? null);
     setDealerIdState(input.dealerId);
@@ -182,12 +214,21 @@ export function useOrder(orderId: string, meId: string | null) {
     );
   }
 
-  const computed = useMemo<ComputedOrder | null>(() => {
+  const computed = useMemo<UseOrderComputed | null>(() => {
     if (!catalog || rate <= 0) return null;
+    // Review M-2: a line whose discount no longer fits its (possibly just-lowered) price must
+    // never reach `computeOrder`/`lineTotal`, which throws — it would crash the whole screen on
+    // render. Such a line is set aside as "invalid" and shown with an actionable error instead.
+    const invalidLineIds: string[] = [];
     const priced = lines
       .map((l) => {
         const product = catalog.products.find((p) => p.id === l.productId);
         if (!product) return null;
+        const value = l.qty * product.unitPriceCents;
+        if (l.discountCents > value) {
+          invalidLineIds.push(l.id);
+          return null;
+        }
         return {
           id: l.id,
           productId: l.productId,
@@ -198,8 +239,11 @@ export function useOrder(orderId: string, meId: string | null) {
         };
       })
       .filter((l): l is NonNullable<typeof l> => l !== null);
-    if (priced.length === 0) return { lines: [], totalUsdCents: 0, totalSdg: 0, blockingLineIds: [], canSave: false };
-    return computeOrder({ rate, lines: priced });
+    if (priced.length === 0) {
+      return { lines: [], totalUsdCents: 0, totalSdg: 0, blockingLineIds: [], canSave: false, invalidLineIds };
+    }
+    const result = computeOrder({ rate, lines: priced });
+    return { ...result, canSave: result.canSave && invalidLineIds.length === 0, invalidLineIds };
   }, [catalog, rate, lines]);
 
   const buildInput = useCallback((): OrderInput | null => {
@@ -207,9 +251,21 @@ export function useOrder(orderId: string, meId: string | null) {
     return {
       dealerId,
       rate,
-      lines: lines.map((l) => ({ id: l.id, productId: l.productId, qty: l.qty, discountCents: l.discountCents })),
+      lines: lines.map((l) => {
+        // Review M-4: report the price the client last displayed for this line (from the cached
+        // catalog) so the server's `priceChanges` can tell the adviser when it differs — never
+        // used for money math server-side (R1).
+        const product = catalog?.products.find((p) => p.id === l.productId);
+        return {
+          id: l.id,
+          productId: l.productId,
+          qty: l.qty,
+          discountCents: l.discountCents,
+          ...(product ? { clientUnitPriceCents: product.unitPriceCents } : {}),
+        };
+      }),
     };
-  }, [dealerId, rate, lines]);
+  }, [dealerId, rate, lines, catalog]);
 
   /** A synthetic OrderView for rendering a locally queued (not-yet-synced) save read-only. */
   const localOrderView = useMemo<OrderView | null>(() => {
@@ -225,7 +281,9 @@ export function useOrder(orderId: string, meId: string | null) {
       rate,
       lines: lines.map((l, index) => {
         const product = catalog.products.find((p) => p.id === l.productId);
-        const c = computed.lines[index];
+        // Looked up by id, not index: `computed.lines` omits invalid lines (M-2), so it is not
+        // necessarily aligned 1:1 with `lines` any more.
+        const c = computed.lines.find((cl) => cl.id === l.id);
         return {
           id: l.id,
           position: index,
@@ -254,12 +312,34 @@ export function useOrder(orderId: string, meId: string | null) {
   const isMine = !server || isCreator;
   const canEdit = isMine && (!server || server.status === "draft") && queuedIntent !== "save";
 
+  // Review M-4: tell the adviser, once, whenever the server reports a price that differs from
+  // what was cached on this device (spec §6: "the user is told if it changed"). A ref (not state)
+  // tracks what was already announced so the same batch isn't re-toasted on every re-render.
+  const announcedPriceChangesRef = useRef<string>("");
+  useEffect(() => {
+    if (priceChanges.length === 0 || !catalog) return;
+    const signature = JSON.stringify(priceChanges);
+    if (signature === announcedPriceChangesRef.current) return;
+    announcedPriceChangesRef.current = signature;
+    priceChanges.forEach((pc) => {
+      const product = catalog.products.find((p) => p.id === pc.productId);
+      show(
+        `Note: the price of ${product?.name ?? "a product"} changed from ${formatUsd(pc.clientUnitPriceCents)} to ${formatUsd(
+          pc.serverUnitPriceCents,
+        )}. Totals reflect the new price.`,
+        "info",
+      );
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [priceChanges, catalog]);
+
   const runAutosave = useCallback(async () => {
+    if (!meId) return;
     const input = buildInput();
     if (!input || input.lines.length === 0) return;
-    await saveLocalInput(orderId, input);
+    await saveLocalInput(orderId, input, meId);
     if (!navigator.onLine) {
-      await enqueue(orderId, "draft", input);
+      await enqueue(orderId, "draft", input, meId);
       await refreshQueuedIntent();
       return;
     }
@@ -268,12 +348,17 @@ export function useOrder(orderId: string, meId: string | null) {
       isNewOrderRef.current = false;
       setPriceChanges(result.data.priceChanges);
       setServer((prev) => ({ ...(prev ?? result.data), ...result.data }));
-      await saveLocalInput(orderId, input, { server: result.data, syncState: "synced" });
+      await saveLocalInput(orderId, input, meId, { server: result.data, syncState: "synced" });
     } else if (result.error.code === "NETWORK") {
-      await enqueue(orderId, "draft", input);
+      await enqueue(orderId, "draft", input, meId);
       await refreshQueuedIntent();
+    } else {
+      // Review m-4: a non-network autosave failure (e.g. 422 after a price drop, 409 once
+      // pending/saved) must not be swallowed — the adviser would otherwise believe the draft is
+      // stored when it isn't.
+      setError(result.error);
     }
-  }, [buildInput, orderId, refreshQueuedIntent]);
+  }, [buildInput, meId, orderId, refreshQueuedIntent]);
 
   const runAutosaveRef = useRef(runAutosave);
   runAutosaveRef.current = runAutosave;
@@ -344,13 +429,14 @@ export function useOrder(orderId: string, meId: string | null) {
   }
 
   async function save() {
+    if (!meId) return;
     const input = buildInput();
     if (!input) return;
     setSaving(true);
     setError(null);
-    await saveLocalInput(orderId, input);
+    await saveLocalInput(orderId, input, meId);
     if (!navigator.onLine) {
-      await enqueue(orderId, "save", input);
+      await enqueue(orderId, "save", input, meId);
       await refreshQueuedIntent();
       setSaving(false);
       return;
@@ -360,9 +446,9 @@ export function useOrder(orderId: string, meId: string | null) {
     if (result.ok) {
       applyServerOrder(result.data.order);
       setPriceChanges(result.data.priceChanges);
-      await saveLocalInput(orderId, input, { server: result.data.order, syncState: "synced" });
+      await saveLocalInput(orderId, input, meId, { server: result.data.order, syncState: "synced" });
     } else if (result.error.code === "NETWORK") {
-      await enqueue(orderId, "save", input);
+      await enqueue(orderId, "save", input, meId);
       await refreshQueuedIntent();
     } else {
       setError(result.error);

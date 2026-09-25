@@ -114,7 +114,73 @@ export function OrderLinesTable({
           {lines.map((line) => {
             const product = products.find((p) => p.id === line.productId);
             const computed = computedLines.find((c) => c.id === line.id);
-            if (!product || !computed) return null;
+            if (!product) return null;
+            // Review M-2: the discount no longer fits this line's (possibly just-lowered) price.
+            // The domain module would throw for this line, so it was excluded from
+            // `computedLines` upstream — render it as an actionable error instead of a crash.
+            if (!computed) {
+              const value = line.qty * product.unitPriceCents;
+              return (
+                <Fragment key={line.id}>
+                  <tr data-line-id={line.id} className="border-b border-border-default border-l-2 border-l-danger-500 border-dashed last:border-0">
+                    <td className="px-3 py-2">
+                      {product.name} ×{line.qty}
+                    </td>
+                    <td className="px-3 py-2">
+                      {readOnly ? (
+                        line.qty
+                      ) : (
+                        <input
+                          type="number"
+                          min={1}
+                          aria-label="Qty"
+                          value={line.qty}
+                          onChange={(e) => onQtyChange?.(line.id, Math.max(1, Number(e.target.value) || 1))}
+                          className="focus-ring w-16 rounded-md border border-border-default px-2 py-1 text-mono-num tabular-nums"
+                        />
+                      )}
+                    </td>
+                    <td className="px-3 py-2 tabular-nums text-text-secondary">{formatUsd(product.unitPriceCents)}</td>
+                    <td className="px-3 py-2">
+                      {readOnly ? (
+                        <span className="tabular-nums">{formatUsd(line.discountCents)}</span>
+                      ) : (
+                        <DiscountCell
+                          cents={line.discountCents}
+                          lineValueCents={value}
+                          onChange={(cents) => onDiscountChange?.(line.id, cents)}
+                        />
+                      )}
+                    </td>
+                    <td className="px-3 py-2 tabular-nums">—</td>
+                    <td className="px-3 py-2">
+                      <span className="inline-flex items-center gap-1 rounded-full bg-danger-100 px-2 py-1 text-small font-medium text-danger-900">
+                        Invalid
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums text-mono-num font-semibold text-danger-900">—</td>
+                    {!readOnly && (
+                      <td className="px-3 py-2">
+                        <button
+                          type="button"
+                          aria-label={`Remove ${product.name}`}
+                          onClick={() => onRemove?.(line.id)}
+                          className="focus-ring text-text-secondary hover:text-danger-900"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </td>
+                    )}
+                  </tr>
+                  <tr>
+                    <td colSpan={8} className="px-3 pb-2 text-small text-danger-900">
+                      Discount ({formatUsd(line.discountCents)}) exceeds the new line value ({formatUsd(value)}) —
+                      reduce the discount or remove this line.
+                    </td>
+                  </tr>
+                </Fragment>
+              );
+            }
             const isBlocked = computed.state === "blocked";
             const meta = approvalMeta[line.id];
             return (

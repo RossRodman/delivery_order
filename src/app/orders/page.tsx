@@ -6,31 +6,93 @@ import { api } from "@/client/api";
 import { useMe } from "@/client/hooks/useMe";
 import type { OrderStatus, OrderSummary } from "@/contracts/api";
 import { TopBar } from "@/components/TopBar";
-import { OrdersTable } from "@/components/OrdersTable";
+import { OrdersTable, type LocalTag } from "@/components/OrdersTable";
 import { EmptyState } from "@/components/EmptyState";
 import { Skeleton } from "@/components/Skeleton";
+import { loadCatalog } from "@/client/offline/catalog";
+import { listLocalOrders, type LocalOrder } from "@/client/offline/db";
+import { buildLocalSummary } from "@/client/offline/orders";
+import { listOutboxFifo } from "@/client/offline/outbox";
+
+/** "Queued" (outbox has a `save`) beats "Rejected" beats "Local" (never reached the network). */
+async function tagLocalOrders(local: LocalOrder[], userId: string): Promise<Record<string, LocalTag>> {
+  const outbox = await listOutboxFifo();
+  const saveQueued = new Set(outbox.filter((e) => e.userId === userId && e.intent === "save").map((e) => e.orderId));
+  const tags: Record<string, LocalTag> = {};
+  for (const l of local) {
+    if (saveQueued.has(l.id)) tags[l.id] = "queued";
+    else if (l.syncState === "rejected") tags[l.id] = "rejected";
+    else if (l.syncState !== "synced") tags[l.id] = "local";
+  }
+  return tags;
+}
 
 export default function OrdersPage() {
   const router = useRouter();
   const me = useMe();
   const [orders, setOrders] = useState<OrderSummary[] | null>(null);
+  const [localTags, setLocalTags] = useState<Record<string, LocalTag>>({});
+  const [offlineList, setOfflineList] = useState(false);
   const [counts, setCounts] = useState({ pendingApproval: 0 });
   const [filter, setFilter] = useState<OrderStatus | "all">("all");
+  const meId = me.status === "authenticated" ? me.user.id : null;
 
   useEffect(() => {
     if (me.status !== "authenticated") return;
+    const meUser = me.user;
     let cancelled = false;
-    api.listOrders(filter === "all" ? undefined : filter).then((result) => {
+
+    async function load() {
+      const serverResult = await api.listOrders(filter === "all" ? undefined : filter);
       if (cancelled) return;
-      if (result.ok) {
-        setOrders(result.data.orders);
-        setCounts(result.data.counts);
+
+      // Review M-3: local-only orders (queued, rejected on sync, or never yet reached the
+      // network) are merged in so they're never findable only by URL — and, offline, the list
+      // renders entirely from IndexedDB instead of an endless skeleton.
+      const local = filter === "all" ? await listLocalOrders(meUser.id) : [];
+      const catalog = local.length > 0 ? await loadCatalog() : null;
+
+      if (serverResult.ok) {
+        setOfflineList(false);
+        setCounts(serverResult.data.counts);
+        const merged = new Map(serverResult.data.orders.map((o) => [o.id, o] as const));
+        const tags = await tagLocalOrders(local, meUser.id);
+        if (catalog) {
+          for (const l of local) {
+            if (l.syncState === "synced" && merged.has(l.id)) continue; // already represented cleanly
+            merged.set(l.id, buildLocalSummary(l, catalog, meUser));
+          }
+        }
+        if (cancelled) return;
+        setOrders(Array.from(merged.values()).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)));
+        setLocalTags(tags);
+        return;
       }
-    });
+
+      // Offline (or any other failure): render entirely from the local cache, scoped to this
+      // user, rather than a skeleton that never resolves.
+      setOfflineList(true);
+      setCounts({ pendingApproval: 0 });
+      const allLocal = await listLocalOrders(meUser.id);
+      const cat = catalog ?? (await loadCatalog());
+      const tags = await tagLocalOrders(allLocal, meUser.id);
+      if (cancelled) return;
+      if (!cat) {
+        setOrders([]);
+        setLocalTags({});
+        return;
+      }
+      const summaries = allLocal.map((l) => buildLocalSummary(l, cat, meUser));
+      setOrders(summaries.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)));
+      setLocalTags(tags);
+    }
+
+    load();
     return () => {
       cancelled = true;
     };
-  }, [me.status, filter]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me.status, meId, filter]);
 
   if (me.status === "loading") {
     return (
@@ -60,6 +122,11 @@ export default function OrdersPage() {
   return (
     <div className="flex flex-1 flex-col gap-4">
       <TopBar user={me.user} title="Orders" />
+      {offlineList && (
+        <div className="mx-4 rounded-md border border-offline-500 bg-sand-100 px-4 py-2 text-small text-sand-900">
+          Showing cached orders. Some may be out of date.
+        </div>
+      )}
       <div className="flex items-center justify-between px-4">
         <div className="flex items-center gap-2">
           <button
@@ -106,7 +173,7 @@ export default function OrdersPage() {
             }
           />
         ) : (
-          <OrdersTable orders={orders} onRowClick={openOrder} />
+          <OrdersTable orders={orders} onRowClick={openOrder} localTags={localTags} />
         )}
       </div>
     </div>

@@ -6,6 +6,8 @@ export type SyncState = "local" | "queued" | "syncing" | "synced" | "rejected";
 
 export interface LocalOrder {
   id: string;
+  /** The user this local copy belongs to (review M-1) — never shown/replayed for another user. */
+  userId: string;
   input: OrderInput;
   server: OrderView | null;
   syncState: SyncState;
@@ -18,6 +20,8 @@ export type OutboxIntent = "draft" | "save";
 
 export interface OutboxEntry {
   orderId: string;
+  /** The user who queued this entry (review M-1) — the sync engine only replays a matching user. */
+  userId: string;
   intent: OutboxIntent;
   payload: OrderInput;
   enqueuedAt: string;
@@ -88,9 +92,11 @@ export async function putLocalOrder(order: LocalOrder): Promise<void> {
   await db.put("orders", order);
 }
 
-export async function listLocalOrders(): Promise<LocalOrder[]> {
+/** All locally cached orders, optionally scoped to one user (review M-1/M-3). */
+export async function listLocalOrders(userId?: string): Promise<LocalOrder[]> {
   const db = await getDb();
-  return db.getAll("orders");
+  const all = await db.getAll("orders");
+  return userId ? all.filter((o) => o.userId === userId) : all;
 }
 
 // ---------- outbox ----------
@@ -115,8 +121,22 @@ export async function listOutbox(): Promise<OutboxEntry[]> {
   return db.getAll("outbox");
 }
 
-/** Test/dev only: wipes all stores. */
+/**
+ * Wipes all local stores (review M-1): called on explicit sign-out and when a different user
+ * signs in on the same device, so one user's cached orders/outbox/identity never leak to another.
+ */
 export async function clearAll(): Promise<void> {
   const db = await getDb();
   await Promise.all([db.clear("meta"), db.clear("orders"), db.clear("outbox")]);
+}
+
+/**
+ * Deletes every Cache Storage entry the service worker populated (review M-1). The cached shells
+ * hold no user data themselves (design.md/plan.md §8.1), but this removes any doubt and any stale
+ * app-shell HTML for the next user on this device.
+ */
+export async function clearServiceWorkerCaches(): Promise<void> {
+  if (typeof caches === "undefined") return;
+  const keys = await caches.keys();
+  await Promise.all(keys.map((key) => caches.delete(key)));
 }

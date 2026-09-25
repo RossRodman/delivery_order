@@ -5,6 +5,8 @@ import { api } from "@/client/api";
 import type { UserView } from "@/contracts/api";
 import { OnlineOfflineIndicator } from "@/components/OnlineOfflineIndicator";
 import { useOnline } from "@/client/offline/useOnline";
+import { clearAll, clearServiceWorkerCaches } from "@/client/offline/db";
+import { outboxCount } from "@/client/offline/outbox";
 
 export function TopBar({
   user,
@@ -15,7 +17,26 @@ export function TopBar({
   backHref?: string;
   title?: string;
 }) {
-  const { isOnline, pendingSyncCount, syncNow } = useOnline();
+  const { isOnline, pendingSyncCount, needsSignIn, syncNow } = useOnline();
+
+  async function handleSignOut() {
+    // Review M-1: sign-out must not leave this user's cached orders, outbox or identity behind
+    // for whoever signs in next on this device.
+    if (user) {
+      const mine = await outboxCount(user.id);
+      if (mine > 0) {
+        const proceed = window.confirm(
+          `You have ${mine} order(s) waiting to sync. They will not upload until you sign back in as ${user.name}. Sign out anyway?`,
+        );
+        if (!proceed) return;
+      }
+    }
+    await api.logout();
+    await clearAll();
+    await clearServiceWorkerCaches();
+    // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+    window.location.href = "/login";
+  }
 
   return (
     <header className="flex items-center justify-between border-b border-border-default bg-bg-surface px-4 py-3">
@@ -32,7 +53,12 @@ export function TopBar({
       </div>
       <div className="flex items-center gap-4">
         <OnlineOfflineIndicator isOnline={isOnline} pendingSyncCount={pendingSyncCount} />
-        {pendingSyncCount > 0 && isOnline && (
+        {needsSignIn && (
+          <a href="/login" className="focus-ring text-small text-danger-900 hover:underline">
+            Sign in to sync
+          </a>
+        )}
+        {!needsSignIn && pendingSyncCount > 0 && isOnline && (
           <button type="button" onClick={syncNow} className="focus-ring text-small text-brand-600 hover:underline">
             Sync now
           </button>
@@ -48,15 +74,7 @@ export function TopBar({
               </Link>
             )}
             <span className="text-text-secondary">{user.name}</span>
-            <button
-              type="button"
-              className="focus-ring text-brand-600 hover:underline"
-              onClick={async () => {
-                await api.logout();
-                // eslint-disable-next-line @next/next/no-location-assign-relative-destination
-                window.location.href = "/login";
-              }}
-            >
+            <button type="button" className="focus-ring text-brand-600 hover:underline" onClick={handleSignOut}>
               Sign out
             </button>
           </nav>

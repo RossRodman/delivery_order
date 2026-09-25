@@ -6,7 +6,7 @@ import { api } from "@/client/api";
 import type { Role } from "@/contracts/api";
 import { RoleLoginCard } from "@/components/RoleLoginCard";
 import { useToast } from "@/components/Toast";
-import { setCachedMe } from "@/client/offline/db";
+import { clearAll, clearServiceWorkerCaches, getCachedMe, setCachedMe } from "@/client/offline/db";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -25,6 +25,16 @@ export default function LoginPage() {
       return;
     }
     setLastToken(result.data.token);
+
+    // Review M-1: signing in as a different user than whatever was cached on this device (a
+    // natural session expiry followed by another demo login, not just an explicit sign-out) must
+    // never let the previous user's cached orders, outbox entries or identity leak into this
+    // session. Same-user re-login (e.g. after a session refresh) keeps its offline data.
+    const previous = await getCachedMe();
+    if (previous && previous.id !== result.data.user.id) {
+      await clearAll();
+      await clearServiceWorkerCaches();
+    }
     await setCachedMe(result.data.user);
     router.push("/orders");
   }

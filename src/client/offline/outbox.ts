@@ -4,12 +4,15 @@ import type { OrderInput } from "@/contracts/api";
 /**
  * Queues a draft/save intent for an order (plan.md §8.2): one entry per order, latest payload
  * wins, and a `save` intent is never downgraded back to `draft` by a later autosave tick.
+ * `userId` (review M-1) is the signed-in user queuing the change; the sync engine only ever
+ * replays an entry whose `userId` matches the currently signed-in user.
  */
-export async function enqueue(orderId: string, intent: OutboxIntent, payload: OrderInput): Promise<void> {
+export async function enqueue(orderId: string, intent: OutboxIntent, payload: OrderInput, userId: string): Promise<void> {
   const existing = await getOutboxEntry(orderId);
   const effectiveIntent: OutboxIntent = existing?.intent === "save" ? "save" : intent;
   const entry: OutboxEntry = {
     orderId,
+    userId: existing?.userId ?? userId,
     intent: effectiveIntent,
     payload,
     enqueuedAt: existing?.enqueuedAt ?? new Date().toISOString(),
@@ -29,9 +32,10 @@ export async function listOutboxFifo(): Promise<OutboxEntry[]> {
   return entries.sort((a, b) => a.enqueuedAt.localeCompare(b.enqueuedAt));
 }
 
-export async function outboxCount(): Promise<number> {
+/** Total queued entries, or only those queued by `userId` (review M-1). */
+export async function outboxCount(userId?: string): Promise<number> {
   const entries = await listOutbox();
-  return entries.length;
+  return userId ? entries.filter((e) => e.userId === userId).length : entries.length;
 }
 
 export async function markAttempt(orderId: string): Promise<void> {
