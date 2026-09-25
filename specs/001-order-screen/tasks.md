@@ -42,7 +42,7 @@ already applied and the next cut-lines are in plan.md §12. Status: **READY FOR 
 - **Depends on:** B0
 - **DoD:** `pnpm db:migrate` on empty DB succeeds; `db-guards.int.test.ts` passes, asserting SQLSTATE for: rate 7,999 on orders and app_settings (CHECK), qty 0, discount > value, insert order with `status='saved'` (`OS422`), save transition with unapproved 7.25% line (`OS422`, DETAIL lists line id), save with approved line whose approved terms match (succeeds), save with price ≠ product price (`OS422 PRICE_MISMATCH`), wrong totals (`OS500`), update/delete saved order and insert/update/delete its lines (`OS409`), terms update on approved line clears approval (trigger 4).
 
-### [ ] B4 — Seed and DB scripts  `backend`
+### [x] B4 — Seed and DB scripts  `backend`
 - **Goal:** CLI wrappers around B3's `seed(db)` (plan §4.3 table).
 - **Files:** `scripts/seed.ts` (calls `seed(db)` from `src/server/db/seed.ts`), `scripts/reset-db.ts`.
 - **Depends on:** B3
