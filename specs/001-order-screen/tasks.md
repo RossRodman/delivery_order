@@ -95,7 +95,7 @@ already applied and the next cut-lines are in plan.md §12. Status: **READY FOR 
 - **Depends on:** B11a, F9
 - **DoD:** prod redeployed; script exits 0 again; login + AC1 flow and one offline save manually verified on prod.
 
-### [ ] B12 — README  `backend`  (spec §9)
+### [x] B12 — README  `backend`  (spec §9)
 - **Goal:** README with: local setup (docker, env, migrate, seed, dev), pinned Next version, test commands, **how AC2 is proven** (integration test file names, curl script, DB trigger), AC → test table (copy from plan §9.1), architecture summary, known cosmetic gaps in order numbers (m-8), "what I would do differently in a real build".
 - **Files:** `README.md`.
 - **Depends on:** B10, F10 (add prod URL when B11a/B11b are done)
