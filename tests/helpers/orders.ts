@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { GET as listGet } from "@/app/api/orders/route";
 import { GET as orderGet, PUT as orderPut } from "@/app/api/orders/[id]/route";
-import type { OrderInput, OrdersListResponse, OrderView, PutOrderResponse } from "@/contracts/api";
+import { POST as savePost } from "@/app/api/orders/[id]/save/route";
+import type { OrderInput, OrdersListResponse, OrderView, PutOrderResponse, SaveOrderResponse } from "@/contracts/api";
 import { DEALER, P } from "./fixtures";
 import { buildRequest, call, type ErrorBody } from "./http";
 
@@ -33,4 +34,8 @@ export async function getOrder(token: string, id: string) {
 
 export async function listOrders(token: string, query = "") {
   return call<Body<OrdersListResponse>>(listGet, buildRequest("GET", `/api/orders${query}`, { token }));
+}
+
+export async function saveOrder(token: string, id: string, body: unknown) {
+  return call<Body<SaveOrderResponse>>(savePost, buildRequest("POST", `/api/orders/${id}/save`, { token, body }), { id });
 }

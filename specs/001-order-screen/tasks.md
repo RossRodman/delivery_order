@@ -66,7 +66,7 @@ already applied and the next cut-lines are in plan.md §12. Status: **READY FOR 
 - **Depends on:** B6
 - **DoD:** PUT new id creates draft (200 per contract); unit price taken from DB even if body has `unitPriceCents`/`clientUnitPriceCents` (latter reported in `priceChanges`); removed lines deleted; rate 7,999 → 422 and no row created; unknown dealer/product → 422; discount > qty×DB price → 422 with `lineIds`; changing an approved line's terms resets approval (AC6, via trigger 4); **PUT with unchanged terms keeps `approval.status='approved'`** — the upsert `DO UPDATE SET` list is exactly `product_id, qty, unit_price_cents, discount_cents, position` (M-1); PUT on saved → 409 `ORDER_IMMUTABLE`; PUT on pending → 409 `ORDER_NOT_EDITABLE`; adviser B cannot GET/PUT adviser A's order (404; test inserts a second adviser); list: adviser sees own only, owner sees all, `status=pending_approval` filter and `counts.pendingApproval`.
 
-### [ ] B8 — Save endpoint with idempotency  `backend`  (R1, R7, R8, R9; AC1, AC2, AC4, AC7-server)
+### [x] B8 — Save endpoint with idempotency  `backend`  (R1, R7, R8, R9; AC1, AC2, AC4, AC7-server)
 - **Goal:** E10 (plan §6.4 E10 branch + §8.4).
 - **Files:** `src/app/api/orders/[id]/save/route.ts`, `src/server/services/orders.ts`, `tests/integration/{ac1-worked-example,ac2-server-refusal,ac4-snapshot,idempotency}.int.test.ts`.
 - **Depends on:** B7
