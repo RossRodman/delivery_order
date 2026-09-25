@@ -60,7 +60,7 @@ already applied and the next cut-lines are in plan.md §12. Status: **READY FOR 
 - **Depends on:** B5
 - **DoD:** catalog returns seeded data + `globalRate: 8200`; owner PATCH price → 200 and reflected in catalog; owner PUT 9,000 → 200; PUT 7,999 → 422 `RATE_BELOW_MINIMUM` and value unchanged (no clamp); adviser PATCH/PUT → 403 `FORBIDDEN` and DB unchanged; price 0 → 400.
 
-### [ ] B7 — Order draft endpoints (create/update/read/list)  `backend`  (R1, R2, R4, R5, R6; AC3, AC6)
+### [x] B7 — Order draft endpoints (create/update/read/list)  `backend`  (R1, R2, R4, R5, R6; AC3, AC6)
 - **Goal:** E7, E8, E9 with the shared `upsertAndTransition` service (plan §6.4 steps 1–6, E9 branch) and `views.ts` (OrderView/OrderSummary built with `computeOrder`).
 - **Files:** `src/server/services/{orders,views}.ts`, `src/app/api/orders/route.ts`, `src/app/api/orders/[id]/route.ts`, `tests/integration/orders-draft.int.test.ts`.
 - **Depends on:** B6
