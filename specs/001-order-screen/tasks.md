@@ -84,7 +84,7 @@ already applied and the next cut-lines are in plan.md §12. Status: **READY FOR 
 - **Depends on:** B9
 - **DoD:** with `BASE_URL` (default `http://localhost:3000`): logs in as adviser via E1, fetches catalog, generates a **fresh** UUID (never PUT), POSTs E10 with the AC1 3-line payload (7.25% line unapproved), prints request/response, asserts HTTP 422 + `UNAPPROVED_BLOCKED_LINES`, then GET E8 → 404 (nothing persisted); also asserts adviser PUT global rate → 403 and rate 7,999 → 422. Exits 0 only if all assertions hold; runs green against `pnpm build && pnpm start` locally.
 
-### [ ] B11a — First deployment (Vercel + Supabase)  `backend`  (spec §9; M-4)
+### [x] B11a — First deployment (Vercel + Supabase)  `backend`  (spec §9; M-4)
 - **Goal:** working public URL with the backend core (plan §10). Accounts are supplied by the stakeholder later — do not create accounts; if they have not arrived, skip and continue other tasks (nothing depends on B11a).
 - **Files:** `.env.example` (final, with `?sslmode=require` note), README deployment section (draft).
 - **Depends on:** B10 + stakeholder accounts
