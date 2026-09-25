@@ -17,7 +17,7 @@ no state libraries.
 
 | Concern | Choice | Why |
 |---|---|---|
-| Framework | Next.js 16.x, **exact version pinned in B0** (the one `create-next-app@latest` installs; recorded here and in README — no `^`), App Router, `src/` dir, TypeScript `strict` | Fixed by brief. Route Handlers give us a plain JSON API testable without a browser. B0 verifies that this version uses `src/proxy.ts` (fallback: `src/middleware.ts`) and builds with Turbopack. Static `/order` shell reads `useSearchParams` → must be wrapped in `<Suspense>` or `next build` fails. |
+| Framework | Next.js **16.3.6** (exact, pinned in B0 — the version `create-next-app@latest` installed on 2026-09-25; also recorded in README), App Router, `src/` dir, TypeScript `strict` | Fixed by brief. Route Handlers give us a plain JSON API testable without a browser. B0 verified: this version uses `src/proxy.ts` (Middleware renamed to Proxy in Next 16) and builds with Turbopack. Static `/order` shell reads `useSearchParams` → must be wrapped in `<Suspense>` or `next build` fails. |
 | Styling | Tailwind CSS v4 (CSS-first `@theme` in `globals.css`) + `lucide-react` icons | Fixed by brief; design.md tokens map 1:1 into `@theme` (design shows a v3-style `tailwind.config.ts` excerpt — same values, expressed as `--color-sand-100` etc.). |
 | DB | PostgreSQL 17 (docker locally, Supabase in prod) | Fixed. |
 | DB access | Drizzle ORM + `postgres` (postgres-js) | Typed queries, SQL-first migrations, custom SQL migrations for triggers, tiny runtime. `prepare: false` so it works with Supabase's transaction pooler. |

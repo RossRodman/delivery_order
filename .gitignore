@@ -1,10 +1,37 @@
+# dependencies
 node_modules/
+/.pnp
+.pnp.*
+
+# next.js
 .next/
-.env
-.env.local
-.env*.local
+/out/
+/build
+next-env.d.ts
+*.tsbuildinfo
+
+# testing
 coverage/
 playwright-report/
 test-results/
+/blob-report/
+/playwright/.cache/
+
+# env files (only the example is committed)
+.env
+.env.local
+.env*.local
+.env.*
+!.env.example
+
+# misc
+.DS_Store
+*.pem
+npm-debug.log*
+.pnpm-debug.log*
+
+# vercel
 .vercel/
+
+# local claude settings
 .claude/settings.local.json
