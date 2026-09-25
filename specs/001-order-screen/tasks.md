@@ -18,19 +18,19 @@ already applied and the next cut-lines are in plan.md §12. Status: **READY FOR 
 
 ## Backend
 
-### [ ] B0 — Project scaffold and tooling  `backend`
+### [x] B0 — Project scaffold and tooling  `backend`
 - **Goal:** runnable empty app + DB + test runners that every other task builds on.
 - **Files:** `package.json` (scripts: `dev build start typecheck lint test test:int test:e2e verify db:generate db:migrate db:seed db:reset`), `tsconfig.json` (strict), `next.config.ts` (`generateBuildId`, `NEXT_PUBLIC_BUILD_ID`), `src/app/layout.tsx`, `src/app/globals.css`, `eslint.config.mjs`, `vitest.config.ts` (projects `unit`, `integration`), `playwright.config.ts` (skeleton), `docker-compose.yml`, `docker/initdb/01-test-db.sql` (creates `order_screen_test`, `order_screen_e2e`), `.env.example`, `.gitignore`.
 - **Depends on:** –
 - **DoD:** `docker compose up -d` gives a healthy Postgres 17 with 3 DBs; `pnpm build`, `pnpm test` (one placeholder test), `pnpm typecheck`, `pnpm lint` pass; `git init` done; **exact `next` version pinned** (no `^`) and recorded in plan.md §1 + README; confirmed whether this version uses `src/proxy.ts` (else `src/middleware.ts`) and noted; any page reading `useSearchParams` wrapped in `<Suspense>` (build must pass); **ask the user for Vercel + Supabase access now** (needed by B11a, not blocking).
 
-### [ ] B1 — Shared pure domain module  `backend`  (R2, R3, R4, R5, R8; AC1, AC3, AC6)
+### [x] B1 — Shared pure domain module  `backend`  (R2, R3, R4, R5, R8; AC1, AC3, AC6)
 - **Goal:** `src/domain/*` exactly as plan.md §3.1, no framework imports.
 - **Files:** `src/domain/{money,line,approval,rate,order,limits,index}.ts` + colocated `*.test.ts`.
 - **Depends on:** B0
 - **DoD:** unit tests pass and cover: AC1 table (plan §3.2) for bp, class, line totals, order totals, SDG totals 29,274,000 and 45,018,000; boundaries 3.00% sand, 5.00% red, 5.0001% blocked; `sameTerms`/`effectiveState` for each changed field; `checkRate` 7,999/8,000/100,001; `divRoundHalfUp` (…49/…50); `parseUsdToCents` (`"40"`, `"40.5"`, `"1,550.50"`, rejects `"1e3"`, `"-1"`, `"4.555"`); `formatUsd/Sdg/Percent/Rate` strings from design.md §2/§4.4; `canonicalOrderKey` order-insensitive to object key order but sensitive to line order; safe-integer assertions throw. An ESLint `no-restricted-imports` rule forbids `next`, `react`, `@/server` in `src/domain`.
 
-### [ ] B2 — API contracts  `backend`  (contract for both tracks)
+### [x] B2 — API contracts  `backend`  (contract for both tracks)
 - **Goal:** zod schemas + TS types + `ErrorCode` union from plan.md §6.1–6.2.
 - **Files:** `src/contracts/api.ts`, `src/contracts/errors.ts`, `src/contracts/api.test.ts`.
 - **Depends on:** B1
