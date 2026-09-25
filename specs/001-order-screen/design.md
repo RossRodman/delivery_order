@@ -19,10 +19,25 @@ left border accent on the line row itself so the state reads even out of the cor
 |---|---|---|---|---|---|---|
 | `sand` | discount ≤ 3% — ok | `#FDF3E1` (`sand-100`) | `#7A4E00` (`sand-900`) | `#D9A441` (`sand-500`) | ● filled circle (`CheckCircle` outline ok too) | "OK" |
 | `red` | 3% < discount ≤ 5% — warning, still saveable | `#FDECEC` (`red-100`) | `#8A1F1F` (`red-900`) | `#E0403D` (`red-500`) | ▲ triangle-alert | "Warning" |
-| `blocked` | discount > 5% — not saveable without approval | `#F3F4F6` (`slate-100`) | `#3F3F46` (`slate-800`) with a red-900 icon | `#DC2626` dashed | ⛔ octagon / lock | "Blocked" |
+| `blocked` | discount > 5% — not saveable without approval | `#F3F4F6` (`slate-100`) | `#3F3F46` (`slate-800`) with a red-900 icon | `#DC2626` dashed (`danger-500`-family, 2px dashed row border) | 🔒 lucide `Lock` | "Blocked" |
 | `approved` | an owner approved this exact blocked line | `#EAF6EE` (`green-100`) | `#166534` (`green-900`) | `#22C55E` (`green-500`) | ✓ check-shield | "Approved" |
 
-Tailwind config (excerpt, `tailwind.config.ts`):
+Tailwind **v4** (CSS-first) — tokens live in `src/app/globals.css`, there is no
+`tailwind.config.ts`:
+
+```css
+@import "tailwindcss";
+@theme {
+  --color-sand-100: #FDF3E1; --color-sand-500: #D9A441; --color-sand-900: #7A4E00;
+  --color-danger-100: #FDECEC; --color-danger-500: #E0403D; --color-danger-900: #8A1F1F;
+  --color-blocked-100: #F3F4F6; --color-blocked-900: #3F3F46;
+  --color-approved-100: #EAF6EE; --color-approved-500: #22C55E; --color-approved-900: #166534;
+  --color-brand-600: #1D4ED8;
+  /* …remaining shades from the palette below, same names */
+}
+```
+
+Full palette (reference values, v3-style notation):
 
 ```ts
 colors: {
@@ -34,12 +49,13 @@ colors: {
 }
 ```
 
+> **Resolved (stakeholder, 2026-09-25):** blocked = grey badge + lucide `Lock` icon + "Blocked"
+> label + dashed red row border. No octagon alternative.
+>
 > Note: `blocked` intentionally uses **grey**, not red, for its badge fill — the client's four states
 > must be mutually distinguishable at a glance, and pure-red-on-red for "red" vs "blocked" fails
 > that. Blocked is differentiated by a dashed red *border* + lock icon + the word "Blocked", which
-> keeps it visually "more severe" than red without colour-clashing. Confirmed against the spec's
-> intent (states must be unmistakable and accessible) — flagged in Open Questions for stakeholder
-> sign-off since the brief names four literal colour words.
+> keeps it visually "more severe" than red without colour-clashing.
 
 ### 1.2 Semantic / system colours
 
@@ -80,7 +96,7 @@ align in the table.
 
 | Kind | Format | Example |
 |---|---|---|
-| USD money | `$` + thousands-separated integer dollars (cents divided, no decimals shown since all example values are whole dollars; if cents are non-zero, show 2 decimals) | `$2,020` / `$1,550.50` |
+| USD money | `$` + thousands-separated dollars; no decimals when cents are zero, otherwise exactly 2 decimals | `$2,020` / `$1,550.50` |
 | SDG money | integer, thousands-separated, suffixed ` SDG` | `29,274,000 SDG` |
 | Discount % | 2 decimal places, `%` suffix | `4.32%` |
 | Rate | integer, thousands-separated, suffixed ` SDG/USD` | `8,200 SDG/USD` |
@@ -141,7 +157,7 @@ Desktop wireframe (≥1024px):
 │ │ Product        Qty  Unit price  Discount $  Disc %   State     Total │ x │
 │ │ Water pump ×4  [4]   $515       [ 40 ]      1.94%   ● OK      $2,020 │ ⌫ │
 │ │ Filter ×2      [2]   $810       [ 70 ]      4.32%   ▲ Warning $1,550 │ ⌫ │
-│ │ Battery ×1     [1]  $2,070      [150 ]      7.25%   ⛔ Blocked $1,920│ ⌫ │
+│ │ Battery ×1     [1]  $2,070      [150 ]      7.25%   🔒 Blocked $1,920│ ⌫ │
 │ │   ⓘ Blocked — needs owner approval before this order can be saved.  │   │
 │ └──────────────────────────────────────────────────────────────────────┘   │
 │                                                                              │
@@ -153,14 +169,14 @@ Desktop wireframe (≥1024px):
 └────────────────────────────────────────────────────────────────────────────┘
 ```
 
-Mobile (≥360px) stacks each line into a card:
+Mobile (≥360px) stacks each line into a card *(cut for time — mobile uses the table in a horizontal scroll container; kept for reference only)*:
 
 ```
 ┌───────────────────────────────┐
 │ Battery                    ⌫  │
 │ Qty [1]   Unit $2,070          │
 │ Discount $ [150]   7.25%       │
-│ ⛔ Blocked                     │
+│ 🔒 Blocked                     │
 │ ⓘ Needs owner approval         │
 ├───────────────────────────────┤
 │ [+ Add product]                │
@@ -173,23 +189,25 @@ Mobile (≥360px) stacks each line into a card:
 ```
 
 **Components:**
-- `DealerPicker` — searchable select, required before lines can be added. Placeholder: "Select a dealer…".
+- `DealerPicker` — plain native `<select>` (search cut for time), required before lines can be added. Placeholder: "Select a dealer…".
 - `RateInput` — numeric input, suffix "SDG/USD", helper text under it showing the global default
   when it differs from the current value: *"Today's default: 8,200"*. See §4.1 for reset behaviour.
-- `OrderLinesTable` (desktop) / `OrderLineCard` (mobile) — one row per line:
-  - Product name + qty badge (`Product ×N`) — product picked via `+ Add product` (opens a searchable
+- `OrderLinesTable` — one row per line (mobile: the same table in a horizontally scrollable
+  container; the stacked mobile card wireframe above (`OrderLineCard`) is **cut for time** and not built):
+  - Product name + qty badge (`Product ×N`) — product picked via `+ Add product` (opens a plain
     product picker modal/drawer; owner-only prices are read-only here for both roles on the line
     itself, since even the owner edits prices in Settings, not inline).
   - `Qty` — number stepper input, integer ≥ 1.
   - `Unit price` — read-only, dimmed text (`text-secondary`), never editable on this screen.
-  - `Discount $` — number input, USD, live-validated `0 ≤ discount ≤ lineValue`.
+  - `Discount $` — text input `inputmode="decimal"`, USD with up to 2 decimals (e.g. `40`, `40.50`),
+    live-validated `0 ≤ discount ≤ lineValue`.
   - `Disc %` — computed, read-only, 2dp.
   - `State` — badge per §1.1.
   - `Line total` — computed, read-only, bold, tabular-nums.
-  - Remove (⌫) icon button, confirms via inline "Undo" toast rather than a modal (fast data entry).
+  - Remove (⌫) icon button — removes immediately (no Undo toast; cut for time).
   - Inline helper row under a `blocked` line: *"Blocked — needs owner approval before this order can
-    be saved."* Under an `approved` line: *"Approved by {owner name} on {date}. Changing qty or
-    discount will void this approval."*
+    be saved."* Under an `approved` line: *"Approved by {owner name} on {date}. Changing qty,
+    discount, or a price change by the owner voids this approval."*
 - `TotalsPanel` — Subtotal, Order total (USD), Order total (SDG). SDG total recomputed live as the
   rate field changes.
 - `ActionBar` — sticky footer (desktop: right-aligned inline; mobile: fixed bottom bar).
@@ -212,7 +230,8 @@ Mobile (≥360px) stacks each line into a card:
 | `error` (save/request-approval rejected by server) | Non-blocking banner above the lines table, red: *"Couldn't save — {server message}."* If the server names offending lines (AC2), those specific rows get a red outline + inline note *"This line needs approval before saving."* Order is not navigated away from; nothing is lost. |
 | `offline` | Amber banner under the top bar: *"You're offline. Changes are saved on this device and will sync when you're back online."* Save button label changes to **"Save (offline)"**; still enabled. |
 | `pending-sync` | Header shows a chip *"N pending sync"* (amber, cloud-off icon). Saved-but-unsynced orders show a small "Queued" tag next to the order status until the server confirms. |
-| `pending_approval` (order-level) | Entire line-editing area becomes read-only (inputs disabled, dimmed) except the ability to withdraw the request (`Cancel request` link). Status chip: `Pending approval`. |
+| `pending_approval` (order-level) | Entire line-editing area becomes read-only (inputs disabled, dimmed) except the ability to withdraw the request (`Cancel request` link — first thing cut if short on time). Status chip: `Pending approval`. The same read-only rendering is used when the viewer is not the order's creator (owner viewing an adviser's order). |
+| `queued` (saved offline, not yet synced) | Rendered read-only like the Saved order view, with a "Queued" tag instead of the saved date, until the server confirms; if the server rejects it, the order becomes editable again with the error banner. |
 | `read-only/saved` | See §3.6 Saved order view — this screen is never shown read-only; saved orders route to their own view. |
 | price-changed-on-sync (offline reconcile) | One-time dismissible banner on the affected order: *"Note: the price of {product} changed from $X to $Y since you went offline. Totals below reflect the new price."* |
 
@@ -252,7 +271,7 @@ Mobile (≥360px) stacks each line into a card:
 ├────────────────────────────────────────────────────────────────────┤
 │ Lines requiring approval                                            │
 │ ┌──────────────────────────────────────────────────────────────┐    │
-│ │ Battery ×1 · $2,070 unit · Discount $150 (7.25%) ⛔ Blocked   │    │
+│ │ Battery ×1 · $2,070 unit · Discount $150 (7.25%) 🔒 Blocked   │    │
 │ │                                    [ Reject ]   [ Approve ]   │    │
 │ └──────────────────────────────────────────────────────────────┘    │
 │                                                                       │
@@ -269,10 +288,9 @@ Mobile (≥360px) stacks each line into a card:
 - **Reject** → confirmation inline (*"Reject this line? The adviser will need to change it."*),
   then line marked `Rejected` (red-900 text, strikethrough discount), order returns to `draft` for
   the adviser with a note.
-- Once every blocked line is resolved (approved or rejected), primary button appears:
-  **"Return to adviser"** (moves order back to `draft`, or stays actionable if adviser can now save
-  directly — decision left to plan.md/backend; from a UI perspective this screen always ends in an
-  explicit action, never silently).
+- Once every pending line is decided (approved or rejected), the order **automatically** returns to
+  `draft` (no "Return to adviser" button). The screen replaces the action area with:
+  *"All lines decided — returned to {adviser name}."* + `← Back to Awaiting approval` link.
 - State: if order has zero blocked lines (e.g. adviser withdrew, or all already resolved), show
   *"Nothing pending on this order."* with a back link.
 
@@ -355,10 +373,12 @@ Applies identically to the order screen's `RateInput` and the settings global-ra
 
 ### 4.2 Discount input behaviour
 
-- Discount `$` input accepts integers only (USD cents are internal; the UI enters/shows whole
-  dollars, since all spec examples are whole dollars — see Open Questions re: cent-level entry).
+- Discount `$` input accepts dollars with **up to 2 decimals** (stakeholder decision): `40`, `40.5`,
+  `40.50`, `1,550.50`. Parsed to integer cents by the shared `parseUsdToCents` (no floats). More than
+  2 decimals or non-numeric → field error (red, `text-small`): *"Enter a dollar amount with up to 2
+  decimals."* The last valid value is kept for calculations until corrected.
 - Live-clamped on blur: if `discount > lineValue`, reset to `lineValue` with helper text: *"Discount
-  can't exceed the line value ($X) — reset to $X."*
+  can't exceed the line value ($X) — reset to $X."* (`$X` via `formatUsd`, so it may show cents.)
 - If `discount < 0`, reset to `0`.
 - `%` and state badge recompute on every keystroke (debounced ~150ms), not just on blur, so the
   adviser gets immediate feedback while typing.
@@ -369,13 +389,11 @@ Applies identically to the order screen's `RateInput` and the settings global-ra
 
 - Tab order per line: Qty → Discount $ → (next line) Qty. Disc%/State/Total are not tabbable
   (read-only/computed).
-- `Enter` in the last line's Discount field, when "Add product" has focus reachable, does not
-  auto-add a new line (avoids accidental line creation); use an explicit `+ Add product` (also
-  reachable via a keyboard shortcut hint shown on hover: "A").
+- `Enter` in the last line's Discount field does not auto-add a new line (avoids accidental line
+  creation); use the explicit `+ Add product` button (no keyboard shortcut — cut for time).
 - `Escape` closes the product-picker modal/drawer without adding a line.
 - All destructive actions (remove line, reject a line) are reachable and confirmable via keyboard
   (focus moves to the confirm/undo control).
-- Global: `Cmd/Ctrl+S` triggers Save order when the button is enabled (nice-to-have, not required).
 
 ### 4.4 Number formatting — implementation note
 
@@ -402,7 +420,7 @@ Order lines                                                  [+ Add product]
 │ Product         Qty  Unit price  Discount $  Disc %   State      Total │
 │ Water pump      [4]   $515       [ 40 ]      1.94%   ● OK       $2,020 │
 │ Filter          [2]   $810       [ 70 ]      4.32%   ▲ Warning  $1,550 │
-│ Battery         [1]  $2,070      [150 ]      7.25%   ⛔ Blocked $1,920 │
+│ Battery         [1]  $2,070      [150 ]      7.25%   🔒 Blocked $1,920 │
 │   ⓘ Blocked — needs owner approval before this order can be saved.    │
 └────────────────────────────────────────────────────────────────────────┘
 
@@ -431,7 +449,7 @@ Order lines                                                  [+ Add product]
 
 ```
 │ Battery         [1]  $2,070      [150 ]      7.25%   ✓ Approved $1,920 │
-│   ⓘ Approved by Yusuf on 9/25/2026. Changing qty or discount voids it. │
+│   ⓘ Approved by Yusuf on 9/25/2026. Changing qty, discount or price voids it. │
 
                                           Order total (USD)       $5,490
                                           Order total (SDG)  45,018,000 SDG
@@ -459,7 +477,7 @@ Battery ×1      $2,070 $150 (7.25%)  ✓ Approved  $1,920
 | `DealerPicker` | dealers[], value, onChange, disabled | Order screen |
 | `ProductPickerModal` | products[], onAdd, onClose | Order screen |
 | `RateInput` | value, defaultValue, min=8000, onChange, disabled, error | Order screen, Settings |
-| `OrderLinesTable` (desktop) / `OrderLineCard` (mobile) | lines[], onQtyChange, onDiscountChange, onRemove, readOnly | Order screen, Approval view (read-only context), Saved order view (readOnly) |
+| `OrderLinesTable` (all widths; `OrderLineCard` cut) | lines[], onQtyChange, onDiscountChange, onRemove, readOnly | Order screen, Approval view (read-only context), Saved order view (readOnly) |
 | `DiscountStateBadge` | state: sand\|red\|blocked\|approved\|rejected | OrderLinesTable, Orders list summary, Approval view |
 | `TotalsPanel` | subtotalUsd, totalUsd, totalSdg, rate | Order screen, Approval view, Saved order view |
 | `ActionBar` | canSave, canRequestApproval, isOffline, onSave, onRequestApproval | Order screen |
@@ -475,25 +493,18 @@ Battery ×1      $2,070 $150 (7.25%)  ✓ Approved  $1,920
 | `LockedFieldTooltip` | label | Saved order view (rate, unit price) |
 
 Icons: use `lucide-react` (tree-shakeable, Tailwind-friendly, no design-kit dependency) —
-`CheckCircle2`, `AlertTriangle`, `ShieldOff`/`Lock`, `ShieldCheck`, `WifiOff`, `Cloud`, `Trash2`,
+`CheckCircle2`, `AlertTriangle`, `Lock` (blocked), `ShieldCheck`, `WifiOff`, `Cloud`, `Trash2`,
 `Plus`, `Search`, `ChevronDown`.
 
 ---
 
 ## 7. Open questions
 
-1. The client names four literal colours ("sand", "red", "blocked", "approved") — `blocked` here is
-   designed as grey + dashed red border + lock icon rather than a fifth hue, to stay distinguishable
-   from `red`. Confirm this reading is acceptable, or if "blocked" should render as a literal red
-   variant instead (e.g. solid dark red vs. the warning's lighter red) — could revisit as two red
-   shades (red-500 warning vs red-700 blocked) if the stakeholder prefers literal colour-per-name
-   over the icon-differentiated approach.
-2. Discount entry: spec stores discount in USD cents; this design has the adviser type whole dollars
-   (matching the AC1 example, which is all whole dollars). Confirm whether cent-level discount entry
-   is actually needed for the take-home, or whole-dollar entry is acceptable (simplifies the input
-   and avoids float parsing in the browser).
-3. Approval view's post-resolution flow ("Return to adviser" vs. auto-save when all lines cleared) is
-   left flexible for plan.md — UI always shows an explicit terminal action, but the exact resulting
-   order status transition should be confirmed with the backend plan.
-4. Product picker UX (modal vs. inline row) is left to implementation convenience; either satisfies
-   this spec as long as it does not let the adviser edit price.
+All resolved (2026-09-25, stakeholder + plan review):
+
+1. **Blocked visual** — RESOLVED: grey badge + lucide `Lock` icon + "Blocked" label + dashed red row
+   border (§1.1).
+2. **Discount entry** — RESOLVED: dollars with up to 2 decimals, stored as cents (§4.2).
+3. **Approval post-resolution flow** — RESOLVED (plan.md §6.4): the order auto-returns to `draft`
+   after the last decision; no "Return to adviser" button (§3.4).
+4. **Product picker UX** — implementation's choice (plain select/modal), price never editable.

@@ -1,5 +1,8 @@
 # Plan 001 — The Order Screen
 
+**Status: READY FOR IMPLEMENTATION** (plan-review.md APPROVE WITH CHANGES — all blockers, majors
+and minors applied; see Revision log at the end).
+
 Inputs: `spec.md` (source of truth, APPROVED), `design.md` (UI). This plan defines architecture,
 data model, API contract, the shared domain module, offline design, tests and deployment.
 Tasks are in `tasks.md`. No application code here.
@@ -14,7 +17,7 @@ no state libraries.
 
 | Concern | Choice | Why |
 |---|---|---|
-| Framework | Next.js latest stable (16.x at scaffold time), App Router, `src/` dir, TypeScript `strict` | Fixed by brief. Route Handlers give us a plain JSON API testable without a browser. |
+| Framework | Next.js 16.x, **exact version pinned in B0** (the one `create-next-app@latest` installs; recorded here and in README — no `^`), App Router, `src/` dir, TypeScript `strict` | Fixed by brief. Route Handlers give us a plain JSON API testable without a browser. B0 verifies that this version uses `src/proxy.ts` (fallback: `src/middleware.ts`) and builds with Turbopack. Static `/order` shell reads `useSearchParams` → must be wrapped in `<Suspense>` or `next build` fails. |
 | Styling | Tailwind CSS v4 (CSS-first `@theme` in `globals.css`) + `lucide-react` icons | Fixed by brief; design.md tokens map 1:1 into `@theme` (design shows a v3-style `tailwind.config.ts` excerpt — same values, expressed as `--color-sand-100` etc.). |
 | DB | PostgreSQL 17 (docker locally, Supabase in prod) | Fixed. |
 | DB access | Drizzle ORM + `postgres` (postgres-js) | Typed queries, SQL-first migrations, custom SQL migrations for triggers, tiny runtime. `prepare: false` so it works with Supabase's transaction pooler. |
@@ -427,8 +430,11 @@ All of E9/E10/E11 run in **one transaction**:
    (R1).** `priceChanges` = lines whose `clientUnitPriceCents` differs.
 4. Validate `discountCents ≤ qty × dbPrice` for every line → 422 `DISCOUNT_EXCEEDS_LINE_VALUE`.
 5. Upsert lines (`ON CONFLICT (order_id,id) DO UPDATE`), delete lines absent from input, update
-   `dealer_id, rate, updated_at`. Changed terms void approvals (service does it explicitly; trigger
-   4 guarantees it).
+   `dealer_id, rate, updated_at`. The `DO UPDATE SET` list is **exactly**
+   `product_id, qty, unit_price_cents, discount_cents, position` — the upsert **never writes**
+   `approval_status`, `approved_*` or `decided_*`. Voiding is done solely by trigger 4, which fires
+   only when a term is `IS DISTINCT FROM` the old value; an autosave with unchanged terms therefore
+   keeps an approval (M-1). New lines are inserted with `approval_status='none'`.
 6. Re-read lines, `computeOrder()` (domain).
    - E9: done (commit), return view.
    - E11: `EMPTY_ORDER` if no lines; `NO_LINES_NEED_APPROVAL` if `blockingLineIds` empty; else set
@@ -460,8 +466,11 @@ The adviser then saves (approved lines count as `approved`) or edits rejected li
   money arithmetic.
 - Order screen state = `OrderInput` + server snapshot; live `computeOrder` using catalog prices for
   immediate feedback; server response replaces it after each save/draft sync.
-- Discount entry: whole dollars in the UI (design.md §4.2 / open question 2), converted with
-  `parseUsdToCents`; the API accepts any cents. Discount > value → reset to value on blur (UI);
+- Discount entry (stakeholder decision): the UI accepts dollars **with up to 2 decimals**
+  (`inputmode="decimal"`, e.g. `40`, `40.5`, `1,550.50`), parsed with `parseUsdToCents` (string
+  parsing, no floats); more than 2 decimals or non-numeric → field error "Enter a dollar amount with
+  up to 2 decimals." The API takes integer cents. The owner's price edit uses the same parser.
+  Discount > value → reset to value on blur (UI, copy uses `formatUsd`, so `$X` may show cents);
   server still rejects with `DISCOUNT_EXCEEDS_LINE_VALUE`.
 - Rate field: on blur/Enter, `< 8000` → value set to 8000 + message "Rate can't be below 8,000
   SDG/USD — reset to the minimum." (AC3 UI). Server 422 `RATE_BELOW_MINIMUM` → banner + refocus.
@@ -469,6 +478,10 @@ The adviser then saves (approved lines count as `approved`) or edits rejected li
 - Drafts are auto-synced (debounced 800 ms `PUT`) while online; offline they go to the outbox (§8).
 - Role-aware nav: Settings + Awaiting approval only for owner; direct URL → full-page 403 state
   based on `GET /api/me` (server still returns 403 on any owner API).
+- Read-only rendering of `/order` (m-6): when the viewer is not the creator (owner opening an
+  adviser's order), or the order is `pending_approval`, or the order has a queued `save` in the
+  outbox (m-3, shown as `SavedOrderView` with a "Queued" tag), the screen renders without inputs or
+  Save/Request buttons. An owner opening a pending order from the list is routed to `/approvals/[id]`.
 
 Routes: `/login`, `/orders`, `/order?id=` (new order: client generates `crypto.randomUUID()` and
 replaces URL), `/approvals/[id]` (owner), `/settings` (owner). `/order` renders `SavedOrderView`
@@ -481,16 +494,22 @@ read-only component tree).
 
 ### 8.1 Service worker (`public/sw.js`, registered only in production builds)
 
+- **Registered only after authentication** (B-2): `sw-register.tsx` calls
+  `navigator.serviceWorker.register` only once `GET /api/me` has returned 200 (i.e. on `/orders` or
+  `/order`, never on `/login` before sign-in), so the SW never observes the unauthenticated
+  `proxy.ts` redirect as a shell page.
 - Registered as `/sw.js?v=<NEXT_PUBLIC_BUILD_ID>`; the SW reads its version from
   `self.location.search` and names caches `shell-<v>`, `static-<v>`; `activate` deletes old caches,
-  `clients.claim()`; `skipWaiting()` on install.
-- `install`: fetch shell documents `/order`, `/orders`, `/login`, `/manifest.webmanifest`; parse each
-  HTML for `/_next/static/…` URLs (`src=`/`href=` regex) and cache them too — so the order screen
-  works offline even if the user never opened it online in this version.
-- `fetch`:
-  - navigations to `/order`, `/orders`, `/login` → network-first (3 s timeout) → cached shell
-    (`ignoreSearch: true`); other navigations → network, fallback to cached `/orders`.
-  - `/_next/static/*`, fonts, icons → cache-first.
+  `clients.claim()`; `skipWaiting()` on install. **No install-time precache and no HTML parsing.**
+- `fetch` (runtime caching only):
+  - navigations to `/order`, `/orders`, `/login` → network-first (3 s timeout). A network response
+    is `cache.put` under its pathname (search stripped) **only if**
+    `response.ok && !response.redirected && response.type === 'basic'`. Offline/timeout → cached
+    shell for that pathname (`ignoreSearch: true`); if none, cached `/orders`; if none, a minimal
+    inline "You're offline" response. Other navigations → network only.
+  - `/_next/static/*`, fonts, icons → cache-first, populated on first request.
+  - Consequence (accepted): a screen works offline after it has been visited online once in the
+    current build — the AC7 e2e visits `/orders` and `/order` online first.
   - `/api/*` → **not intercepted** (data offline comes from IndexedDB, not HTTP caches; avoids
     serving stale authenticated JSON).
 - Links between offline-capable pages use plain `<a href>` (full navigation served by the SW) rather
@@ -510,17 +529,20 @@ read-only component tree).
 
 ### 8.3 Sync engine (`src/client/offline/sync.ts`)
 
-- Triggers: `online` event, app start, `visibilitychange` → visible, every 30 s while online, manual
-  "Sync now" on the pending chip. Single-flight per tab; cross-tab via `navigator.locks.request('sync')`
-  when available (server idempotency makes duplicates harmless anyway).
+- Triggers (trimmed, B-3): `online` event, app start, and manual "Sync now" on the pending chip.
+  Single-flight per tab (in-memory flag). No timer, no `visibilitychange`, no cross-tab locks —
+  server idempotency makes a duplicate replay from a second tab harmless.
 - For each outbox entry (FIFO): `save` → `POST /api/orders/:id/save`; `draft` → `PUT /api/orders/:id`.
   - 2xx → remove from outbox, `orders.server = response`, `syncState='synced'`, store `priceChanges`
     (UI shows design.md "price changed" banner once).
   - 409 `ORDER_ALREADY_SAVED` → `synced` with server copy + notice.
   - 401 → stop the run, keep queue, UI "Sign in to sync".
   - other 4xx → remove from outbox, `syncState='rejected'`, `lastError` stored, order stays locally
-    and is shown with the error on its lines (**never silently dropped**); user edits → re-queued.
-  - 0 (network) / 5xx → keep, `attempts++`, backoff `min(2^attempts × 5 s, 5 min)`.
+    and is shown with the error on its lines (**never silently dropped**); it becomes editable again
+    and user edits → re-queued.
+- An order whose outbox intent is `save` is **read-only locally** (`SavedOrderView` + "Queued" tag)
+  until it syncs or is rejected (m-3), so a locally "saved" order is never silently changed.
+  - 0 (network) / 5xx → keep, `attempts++`, stop this run (retried on the next trigger).
 - Indicator: `OnlineOfflineIndicator` = `navigator.onLine` + last request outcome; `N pending sync`
   = count of outbox entries.
 - Request approval, withdraw, owner screens: online-only (buttons disabled offline with a tooltip).
@@ -538,9 +560,9 @@ belonging to another user → 404.
 
 | Layer | Tool | Scope | DB |
 |---|---|---|---|
-| Unit | vitest (`tests` colocated `src/**/*.test.ts`) | domain module (100% branch target), contracts, client outbox/sync with `fake-indexeddb` + mocked fetch, 2 component tests (RateInput reset, line row rendering) | none |
+| Unit | vitest (`tests` colocated `src/**/*.test.ts`) | domain module (100% branch target), contracts, client outbox/sync with `fake-indexeddb` + mocked fetch, 1 component test (`RateInput` reset); AC1 on-screen numbers are asserted in e2e | none |
 | Integration | vitest `integration` project, `tests/integration/**` | route handlers imported and called with real `Request` objects; DB guards via raw SQL | real Postgres `order_screen_test` (docker); `globalSetup` runs migrations; each file `beforeEach` truncates + seeds; `fileParallelism: false` |
-| E2E | Playwright, `tests/e2e/**` | full UI flows on `next build && next start` (port 3100), DB `order_screen_e2e` reset in `globalSetup` | real Postgres |
+| E2E | Playwright, `tests/e2e/**` | **two specs only (B-3): AC1 and AC7**; AC3–AC6 are covered by integration + unit tests. Full UI flows on `next build && next start` (port 3100), DB `order_screen_e2e` reset in `globalSetup` | real Postgres |
 | Script | `scripts/prove-server-refusal.sh` | AC2 via HTTP against any base URL | server's DB |
 
 Commands: `pnpm test` (unit), `pnpm test:int`, `pnpm test:e2e`, `pnpm typecheck`, `pnpm lint`,
@@ -551,12 +573,12 @@ Commands: `pnpm test` (unit), `pnpm test:int`, `pnpm test:e2e`, `pnpm typecheck`
 | AC | Unit | Integration | E2E / script |
 |---|---|---|---|
 | AC1 | `domain/line.test.ts` (3 lines: bp, class, totals), `domain/order.test.ts` (357,000 → 29,274,000; 549,000 → 45,018,000) | `ac1-worked-example.int.test.ts`: save lines 1–2 at 8,200 → `totals {usdCents:357000, sdg:29274000}`; full flow request-approval → owner approve → save → `{549000, 45018000}` | `ac1-worked-example.spec.ts`: enter 3 lines, assert "1.94% OK", "4.32% Warning", "7.25% Blocked", "$5,490", "45,018,000 SDG", Save disabled; remove line 3 → "$3,570", "29,274,000 SDG", save → saved view; second order with approval via owner → saved |
-| AC2 | – | `ac2-server-refusal.int.test.ts`: adviser bearer token → E10 with 7.25% unapproved line → 422 `UNAPPROVED_BLOCKED_LINES` naming the line; `SELECT count(*) FROM orders WHERE id=$1` = 0 and no `saved` rows; variants: body with `role:'owner'`, `unitPriceCents: 1`, `approval:{…}` fields → still 422; `db-guards.int.test.ts`: raw SQL draft + 7.25% line + `UPDATE status='saved'` with correct totals → SQLSTATE `OS422`; `INSERT … status='saved'` → rejected | `scripts/prove-server-refusal.sh` (exit 0 iff 422 + follow-up GET 404) |
-| AC3 | `domain/rate.test.ts` (7,999 ✗, 8,000 ✓) ; `RateInput.test.tsx` (blur 7999 → 8000 + message) | E9/E10 rate 7,999 → 422 `RATE_BELOW_MINIMUM`, no row; E6 7,999 → 422; raw SQL rate 7,999 → CHECK violation | `ac3-rate-floor.spec.ts`: type 7999, tab → field shows 8,000 + message |
-| AC4 | – | `ac4-snapshot.int.test.ts`: save at 8,200 → owner E6 9,000 + E5 price → E8 still rate 8,200, old unit prices, totals 29,274,000; raw `UPDATE orders SET rate=9000` on saved → `OS409`; `UPDATE order_lines` → `OS409` | `ac4-snapshot.spec.ts` (saved view shows 8,200 after owner changes) |
-| AC5 | – | `ac5-roles.int.test.ts`: adviser → E5, E6, E13 each 403 and DB unchanged; no token → 401; tampered token → 401; second adviser reading first adviser's order → 404 | `ac5-roles.spec.ts`: adviser has no Settings nav; `/settings` shows 403 state |
-| AC6 | `domain/approval.test.ts` (changed qty/discount/price/product → not approved) | `ac6-approval-voiding.int.test.ts`: approve → withdraw not needed (order back to draft) → E9 discount 150→151 → line `state:'blocked'`, `approval.status:'none'` → E10 422; raw SQL update on approved line → approval cleared (trigger 4); stale `expectedTerms` → 409 `LINE_TERMS_CHANGED` | `ac6-voiding.spec.ts`: after approval change qty → badge "Blocked" |
-| AC7 | `offline/sync.test.ts`: 200 → synced; 422 → rejected & kept; network → retained + backoff; 409 already saved → synced | `idempotency.int.test.ts`: same save twice → 200 then 200 `replayed:true`, one row; different content → 409; replay with changed server price → saved at server price + `priceChanges` | `ac7-offline.spec.ts`: login online, open `/order`, `context.setOffline(true)`, reload (served by SW), create order, save → "1 pending sync"; `setOffline(false)` → becomes Saved; second case: offline order that the server rejects (price raised by owner so the discount becomes blocked) → shows server rejection on the line |
+| AC2 | – | `ac2-server-refusal.int.test.ts`: adviser bearer token → E10 with 7.25% unapproved line → 422 `UNAPPROVED_BLOCKED_LINES` naming the line; two separate assertions (M-5): (a) **id never PUT** → `SELECT count(*) FROM orders WHERE id=$1` = 0; (b) **pre-existing draft** (created by E9 first, as the UI's autosave would) → row still `status='draft'`, content unchanged; both cases: zero rows with `status='saved'`; variants: body with `role:'owner'`, `unitPriceCents: 1`, `approval:{…}` fields → still 422; `db-guards.int.test.ts`: raw SQL draft + 7.25% line + `UPDATE status='saved'` with correct totals → SQLSTATE `OS422`; `INSERT … status='saved'` → rejected | `scripts/prove-server-refusal.sh` (fresh id, never PUT: exit 0 iff 422 + follow-up GET 404) |
+| AC3 | `domain/rate.test.ts` (7,999 ✗, 8,000 ✓) ; `RateInput.test.tsx` (blur 7999 → 8000 + message) | E9/E10 rate 7,999 → 422 `RATE_BELOW_MINIMUM`, no row; E6 7,999 → 422; raw SQL rate 7,999 → CHECK violation | (e2e cut, B-3) — UI covered by `RateInput.test.tsx` |
+| AC4 | – | `ac4-snapshot.int.test.ts`: save at 8,200 → owner E6 9,000 + E5 price → E8 still rate 8,200, old unit prices, totals 29,274,000; raw `UPDATE orders SET rate=9000` on saved → `OS409`; `UPDATE order_lines` → `OS409` | (e2e cut, B-3) |
+| AC5 | – | `ac5-roles.int.test.ts`: adviser → E5, E6, E13 each 403 and DB unchanged; no token → 401; tampered token → 401; second adviser reading first adviser's order → 404 | (e2e cut, B-3) |
+| AC6 | `domain/approval.test.ts` (changed qty/discount/price/product → not approved) | `ac6-approval-voiding.int.test.ts`: approve → withdraw not needed (order back to draft) → E9 discount 150→151 → line `state:'blocked'`, `approval.status:'none'` → E10 422; raw SQL update on approved line → approval cleared (trigger 4); one stale `expectedTerms` case → 409 `LINE_TERMS_CHANGED` (m-7); **E9 with unchanged terms keeps `approval.status='approved'`** (M-1) | (e2e cut, B-3) |
+| AC7 | `offline/sync.test.ts`: 200 → synced; 422 → rejected & kept; network → retained; 409 already saved → synced | `idempotency.int.test.ts`: same save twice → 200 then 200 `replayed:true`, one row; different content → 409; replay with changed server price → saved at server price + `priceChanges` | `ac7-offline.spec.ts`: login online, visit `/orders` and `/order` online (runtime cache, B-2), wait for SW controller, `context.setOffline(true)`, reload (served by SW), create order, save → "1 pending sync"; `setOffline(false)` → becomes Saved; second case: offline order that the server rejects (price raised by owner so the discount becomes blocked) → shows server rejection on the line |
 
 ### 9.2 Spec rules → enforcement and tests
 
@@ -578,7 +600,7 @@ Commands: `pnpm test` (unit), `pnpm test:int`, `pnpm test:e2e`, `pnpm typecheck`
 
 | Env var | Local | Vercel |
 |---|---|---|
-| `DATABASE_URL` | `postgres://postgres:postgres@localhost:5432/order_screen` | Supabase **transaction pooler** URI (port 6543); client uses `prepare: false`, `max: 1` per lambda |
+| `DATABASE_URL` | `postgres://postgres:postgres@localhost:5432/order_screen` | Supabase **transaction pooler** URI (port 6543); client uses `prepare: false`, `max: 3`, `ssl: 'require'` when `NODE_ENV=production` (`.env.example` shows `?sslmode=require`) |
 | `DIRECT_URL` | same as above | not needed at runtime; used locally/CI for migrations: Supabase **session pooler** URI (port 5432 on the pooler host, IPv4-reachable; the direct `db.<ref>.supabase.co` host is IPv6-only) |
 | `SESSION_SECRET` | any 32+ chars | `openssl rand -base64 48` |
 | `TEST_DATABASE_URL` | `…/order_screen_test` | – |
@@ -588,6 +610,10 @@ Steps: create Supabase project → `DIRECT_URL=… pnpm db:migrate && pnpm db:se
 machine → Vercel project from the Git repo with env vars → deploy → run
 `BASE_URL=https://… scripts/prove-server-refusal.sh`. Migrations are **not** run inside the Vercel
 build (keeps builds reproducible and avoids build-time DB access).
+
+Scheduling (M-4): deployment is its own task in two steps — **B11a** right after the backend core
+(B10) and **B11b** redeploy after the frontend is done. Accounts are supplied by the stakeholder
+later; B11a waits for them but **nothing else depends on it**, so it never blocks other tasks.
 
 ---
 
@@ -609,10 +635,23 @@ build (keeps builds reproducible and avoids build-time DB access).
 8. **Owner's own orders** — owner can create/save orders; saving a blocked line still needs an
    approval (owner may approve their own line via request-approval → decision). Owner cannot edit
    an adviser's order content, only decide lines.
-9. **Discount entry granularity** — UI whole dollars (design), API cents.
+9. **Discount entry granularity** — stakeholder decision: UI accepts up to 2 decimals (cents),
+   parsed by `parseUsdToCents`; API cents. (B-1)
 10. **Upper bounds** (qty, price, rate, lines) — added only to keep integer math in safe range.
-11. **Blocked colour** — design's grey+dashed red border+lock accepted for build; open question
-    stays with the stakeholder (design.md OQ1), a token swap if they disagree.
+11. **Blocked visual** — RESOLVED by stakeholder: grey badge + lucide `Lock` icon + "Blocked" label +
+    dashed `danger-500` row border (design.md §1.1, OQ1 closed). (M-2)
+12. **Owner price change after approval** (m-4) — unit price is part of the approved terms, so an
+    owner price change voids the approval on the adviser's next PUT/save (trigger 4 fires because
+    the server rewrites `unit_price_cents` from the DB). The `priceChanges` banner explains it, the
+    line returns to `blocked`, and the adviser re-requests approval. Helper copy in design.md §3.2
+    says so.
+13. **Order number gaps** (m-8) — accepted: `INSERT … ON CONFLICT DO NOTHING` consumes an identity
+    value on each conflicting call, so `number` has gaps. Cosmetic; noted in README. Not worth a
+    `WHERE NOT EXISTS` variant (which still races).
+14. **Withdraw approval** (B-3 item 6) — kept on the server (E12, ~15 lines, already tested);
+    the "Cancel request" UI link is a cut-line item (F2) if time runs short.
+
+Review findings rejected: none. m-7 is applied as "keep the check, one test, toast only".
 
 ---
 
@@ -621,10 +660,36 @@ build (keeps builds reproducible and avoids build-time DB access).
 | Risk | Mitigation |
 |---|---|
 | Service worker flakiness in Playwright / Next 16 build output changes | Hand-written SW with minimal surface; e2e waits for `navigator.serviceWorker.ready` + controller before going offline; the outbox logic is covered separately by unit tests so AC7 does not rest on e2e alone. Offline is implemented **last** (tasks F8/F9) so it cannot starve core ACs. |
-| Supabase pooler + prepared statements | `prepare: false`; `max: 1`; documented. |
+| Supabase pooler + prepared statements + TLS | `prepare: false`; `max: 3`; `ssl: 'require'` in production; documented. |
 | IPv6-only direct DB host | migrations via session pooler URI. |
 | `bigint` columns returned as strings | drizzle `bigint({ mode: 'number' })` + safe-integer assertions. |
 | Trigger error mapping drift | custom SQLSTATEs + integration tests that assert both HTTP code and SQLSTATE. |
 | Race: owner edits price during adviser save | `FOR SHARE` on product rows in the save transaction. |
 | Demo login lets anyone be owner | By spec; README "what I'd do differently": real IdP, per-user orgs, audit log. |
-| Time (2 days) | Order: domain → schema/guards → API + AC2 → core UI → owner screens → offline → deploy. Cut-lines if late: mobile card polish, Cmd+S, search in pickers, cross-tab locks. |
+| Time (~1.5 days of agent work) | Order: domain → schema/guards → API + AC2 → **deploy (B11a, end of day 1, once accounts arrive)** → core UI → owner screens → offline → redeploy. **Already cut (B-3):** e2e reduced to AC1 + AC7, no "3 runs in a row"; sync triggers = online + start + manual; SW runtime caching only; no mobile `OrderLineCard` (responsive table with horizontal scroll); plain `<select>` for dealer/product (no search); no Cmd+S, no "A" shortcut, no Undo toast (plain remove); one component test. **Cut next if late:** "Cancel request" UI (E12 stays), price-change banner styling, orders-list search. Server-side work is never cut. |
+
+---
+
+## Revision log
+
+2026-09-25 — applied `plan-review.md` (APPROVE WITH CHANGES) + final stakeholder decisions.
+
+| Finding | Change |
+|---|---|
+| B-1 | Discount input accepts cents (≤ 2 dp) via `parseUsdToCents`, error copy for > 2 dp; plan §7, §11.9; design §4.2 + OQ2 resolved; tasks F2 (and F5 price edit uses same parser). |
+| B-2 | §8.1 rewritten: no install-time precache, no HTML parsing; runtime caching of navigations only when `ok && !redirected && type==='basic'`; SW registered only after `GET /api/me` succeeds; tasks F8 DoD + F10 AC7 spec visit pages online first. |
+| B-3 | Cut list applied: e2e = AC1 + AC7 only (no "3 runs in a row"); sync triggers = online/start/manual; SW runtime caching; no mobile `OrderLineCard`, plain `<select>`, no shortcuts/Undo toast; one component test. §9, §9.1, §12, tasks F2/F7/F10, design §3.2/§4.3/§6 updated. E12 kept server-side; its UI is a cut-line (§11.14). |
+| M-1 | §6.4 step 5: upsert `DO UPDATE SET` limited to terms + position; approval columns never written; voiding only via trigger 4. B7 DoD + AC6 int test: unchanged-terms PUT keeps approval. |
+| M-2 | Blocked = grey badge + `Lock` + "Blocked" + dashed `danger-500` border; design §1.1/§3/§6, OQ1 resolved; plan §11.11; F1 DoD. |
+| M-3 | §1: exact Next version pinned in B0, `proxy.ts` vs `middleware.ts` verified, `<Suspense>` around `useSearchParams`; B0 DoD. |
+| M-4 | Deploy split into B11a (after B10, required) and B11b (after F9); accounts requested at B0, supplied later, non-blocking; §10. |
+| M-5 | AC2 test has two explicit assertions (never-PUT id → 0 rows; pre-existing draft → unchanged draft); §9.1, B8, B10 DoD. |
+| m-1 | DB client `ssl: 'require'` in production, `max: 3`; §10, §12, `.env.example`. |
+| m-2 | Seed data + `seed(db)` moved into B3; B4 keeps CLI scripts only. |
+| m-3 | Order with queued `save` renders read-only with "Queued" tag until synced/rejected; §7, §8.3, F7 DoD, design §3.2. |
+| m-4 | §11.12 + design approved-line helper copy mention owner price changes. |
+| m-5 | Design §3.4: "Return to adviser" button removed; auto-return message + back link. |
+| m-6 | §7 + F2 DoD: non-creator / pending / queued → read-only rendering; owner on pending → `/approvals/[id]`. |
+| m-7 | Kept `expectedTerms` check; one int test; F4 shows a toast only. |
+| m-8 | Accepted order-number gaps; §11.13, README note in B12. |
+| m-9 | Design §1.1 gains a Tailwind v4 `@theme` excerpt. |
