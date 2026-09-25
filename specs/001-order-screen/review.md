@@ -178,3 +178,24 @@ The README is accurate against the code:
 One note: the README's `.env.production.local` warning is good. Also consider mentioning in the offline section that sign-out wipes local data, once N-1 is resolved.
 
 Local DB note: the probes left extra demo orders in the local `order_screen` DB. The Battery price is back at 207,000. The global rate was found at 8,000 (not changed by these probes) and has been set back to the seed value 8,200.
+
+### Final re-review — N-1 fix (04446be)
+
+**Suite:** typecheck and lint clean. Unit 105/105, integration 88/88, build passes, e2e 3/3.
+Everything ran locally with `DATABASE_URL` overridden.
+
+| id | status | evidence (Playwright against local `next start -p 3020`) |
+|---|---|---|
+| N-1 (a) different user signs in | **fixed** | Adviser queues an offline save. The session expires, the 401 keeps the queue, and "Sign in to sync" is shown. Then the owner signs in on the same browser. The adviser's outbox entry and local order are **kept**. The owner's pending chip shows 0 and nothing is sent. The adviser signs back in, the entry syncs, and the outbox is empty. DB: `saved \| Amina`. |
+| N-1 (b) sign-out with pending orders | **fixed** | With the API unreachable, the adviser signs out. The confirm dialog promises upload after sign-in. The adviser signs back in, the entry syncs, and local `syncState` is `synced`. DB: `saved \| Amina`. The dialog now matches the behaviour. |
+| M-1 still fixed | **yes** | No cross-user replay: the entry was never sent during the owner's session. The order was saved under Amina, never Yusuf. The SW shell cache is empty after the user switch. |
+
+### Final verdict: **APPROVE**
+
+Every finding (M-1 to M-4, m-1 to m-7, N-1) has been fixed and checked by re-running its
+reproduction. There are no open blockers or majors. Remaining notes are non-blocking and
+already documented:
+- Order-number gaps.
+- The offline list shows only orders viewed on this device.
+- A raw SQL writer who puts an owner's id in `decided_by` can still approve a line; the database
+  cannot authenticate SQL writers.
