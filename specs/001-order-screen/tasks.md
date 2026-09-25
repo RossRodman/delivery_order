@@ -48,7 +48,7 @@ already applied and the next cut-lines are in plan.md §12. Status: **READY FOR 
 - **Depends on:** B3
 - **DoD:** `pnpm db:reset` works locally; running `pnpm db:seed` twice changes nothing and does not overwrite an edited price; integration test asserts products 51,500 / 81,000 / 207,000, ≥3 dealers, users Amina (adviser) and Yusuf (owner), `global_rate = 8200`; `reset-db.ts` refuses when `NODE_ENV=production` or URL host is not localhost.
 
-### [ ] B5 — Auth, session and HTTP plumbing  `backend`  (spec §2, R9; AC5)
+### [x] B5 — Auth, session and HTTP plumbing  `backend`  (spec §2, R9; AC5)
 - **Goal:** plan.md §5 + error envelope/mapping.
 - **Files:** `src/server/auth/session.ts`, `src/server/http/errors.ts` (ApiError, pg SQLSTATE → code map, zod → `VALIDATION_FAILED`), `src/server/http/route.ts` (wrapper: JSON content-type check, error handling), `src/app/api/auth/demo-login/route.ts`, `src/app/api/auth/logout/route.ts`, `src/app/api/me/route.ts`, `src/proxy.ts`, `tests/helpers/http.ts` (request builder, token factory), `tests/integration/auth.int.test.ts`.
 - **Depends on:** B2, B4
