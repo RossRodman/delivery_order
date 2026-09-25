@@ -54,7 +54,7 @@ already applied and the next cut-lines are in plan.md §12. Status: **READY FOR 
 - **Depends on:** B2, B4
 - **DoD:** tests: demo-login returns token + `Set-Cookie` (HttpOnly, SameSite=Lax); `/api/me` works with cookie and with Bearer; missing/tampered/expired token → 401 `UNAUTHENTICATED`; token for a deleted user → 401; role only from DB (token contains no role claim); mutation with `text/plain` → 415.
 
-### [ ] B6 — Catalog and owner settings endpoints  `backend`  (R1, R5, R6; AC3, AC5)
+### [x] B6 — Catalog and owner settings endpoints  `backend`  (R1, R5, R6; AC3, AC5)
 - **Goal:** E4, E5, E6.
 - **Files:** `src/server/services/{catalog,settings}.ts`, `src/app/api/catalog/route.ts`, `src/app/api/products/[id]/route.ts`, `src/app/api/settings/global-rate/route.ts`, `tests/integration/catalog-settings.int.test.ts`, `tests/integration/ac5-roles.int.test.ts` (catalog/settings part).
 - **Depends on:** B5
