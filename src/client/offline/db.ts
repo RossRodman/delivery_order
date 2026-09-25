@@ -80,6 +80,17 @@ export const setCachedMe = (user: UserView) => setMeta("me", user);
 export const getCachedCatalog = () => getMeta<Catalog>("catalog");
 export const setCachedCatalog = (catalog: Catalog) => setMeta("catalog", catalog);
 
+/**
+ * Forgets only the cached identity (review N-1): used on sign-out and on a different-user
+ * sign-in. `orders`/`outbox` are deliberately left alone — they are already scoped by `userId`
+ * (review M-1), hidden from every other user, and never replayed under the wrong identity, so
+ * wiping them would silently lose a still-unsynced order (spec §6: "never silently lost").
+ */
+export async function clearCachedMe(): Promise<void> {
+  const db = await getDb();
+  await db.delete("meta", "me");
+}
+
 // ---------- orders ----------
 
 export async function getLocalOrder(id: string): Promise<LocalOrder | undefined> {

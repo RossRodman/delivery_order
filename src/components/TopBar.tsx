@@ -5,7 +5,7 @@ import { api } from "@/client/api";
 import type { UserView } from "@/contracts/api";
 import { OnlineOfflineIndicator } from "@/components/OnlineOfflineIndicator";
 import { useOnline } from "@/client/offline/useOnline";
-import { clearAll, clearServiceWorkerCaches } from "@/client/offline/db";
+import { clearCachedMe, clearServiceWorkerCaches } from "@/client/offline/db";
 import { outboxCount } from "@/client/offline/outbox";
 
 export function TopBar({
@@ -20,8 +20,11 @@ export function TopBar({
   const { isOnline, pendingSyncCount, needsSignIn, syncNow } = useOnline();
 
   async function handleSignOut() {
-    // Review M-1: sign-out must not leave this user's cached orders, outbox or identity behind
-    // for whoever signs in next on this device.
+    // Review N-1: sign-out must not lose this user's still-unsynced orders — only the cached
+    // identity and any SW-cached authenticated pages are cleared. `orders`/`outbox` are kept:
+    // they're already scoped by userId (M-1), invisible to whoever signs in next, and pick back
+    // up exactly where they left off once this user signs back in on this device, which is
+    // exactly what the confirmation below promises.
     if (user) {
       const mine = await outboxCount(user.id);
       if (mine > 0) {
@@ -32,7 +35,7 @@ export function TopBar({
       }
     }
     await api.logout();
-    await clearAll();
+    await clearCachedMe();
     await clearServiceWorkerCaches();
     // eslint-disable-next-line @next/next/no-location-assign-relative-destination
     window.location.href = "/login";

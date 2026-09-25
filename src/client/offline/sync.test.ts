@@ -135,6 +135,33 @@ describe("sync engine", () => {
     expect(await listOutboxFifo()).toHaveLength(0);
   });
 
+  it("review N-1: user A's queued save survives user B's whole session and syncs once A returns", async () => {
+    // A queues a save, then the device's session naturally expires and B signs in — the login
+    // page (N-1 fix) must not have wiped A's entry, only overwritten the cached identity.
+    await enqueue("o-n1", "save", input, USER_A.id);
+    await setCachedMe(USER_B);
+
+    await runSync(); // B is signed in: A's entry must not be sent, and must not be dropped either.
+
+    expect(api.saveOrder).not.toHaveBeenCalled();
+    let entries = await listOutboxFifo();
+    expect(entries).toHaveLength(1);
+    expect(entries[0].userId).toBe(USER_A.id);
+
+    // A signs back in on the same device.
+    await setCachedMe(USER_A);
+    vi.mocked(api.saveOrder).mockResolvedValue({
+      ok: true,
+      data: { order: { id: "o-n1" }, replayed: false, priceChanges: [] } as never,
+    });
+
+    await runSync();
+
+    expect(api.saveOrder).toHaveBeenCalledWith("o-n1", input);
+    entries = await listOutboxFifo();
+    expect(entries).toHaveLength(0);
+  });
+
   it("does nothing when no user is cached at all", async () => {
     await clearAll();
     await enqueue("o-nouser", "draft", input, USER_A.id);

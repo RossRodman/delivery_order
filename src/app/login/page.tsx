@@ -6,7 +6,7 @@ import { api } from "@/client/api";
 import type { Role } from "@/contracts/api";
 import { RoleLoginCard } from "@/components/RoleLoginCard";
 import { useToast } from "@/components/Toast";
-import { clearAll, clearServiceWorkerCaches, getCachedMe, setCachedMe } from "@/client/offline/db";
+import { clearServiceWorkerCaches, getCachedMe, setCachedMe } from "@/client/offline/db";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -26,13 +26,15 @@ export default function LoginPage() {
     }
     setLastToken(result.data.token);
 
-    // Review M-1: signing in as a different user than whatever was cached on this device (a
+    // Review M-1/N-1: signing in as a different user than whatever was cached on this device (a
     // natural session expiry followed by another demo login, not just an explicit sign-out) must
-    // never let the previous user's cached orders, outbox entries or identity leak into this
-    // session. Same-user re-login (e.g. after a session refresh) keeps its offline data.
+    // never let the previous user's cached *identity* leak into this session — but must also
+    // never delete that user's still-unsynced orders (spec §6: "never silently lost"). Their
+    // orders/outbox rows are already scoped by userId (M-1), stay hidden from this session, and
+    // sync normally once they sign back in. Only the identity and any SW-cached authenticated
+    // documents are cleared; `setCachedMe` below overwrites the identity regardless.
     const previous = await getCachedMe();
     if (previous && previous.id !== result.data.user.id) {
-      await clearAll();
       await clearServiceWorkerCaches();
     }
     await setCachedMe(result.data.user);
