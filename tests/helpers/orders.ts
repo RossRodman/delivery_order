@@ -2,7 +2,19 @@ import { randomUUID } from "node:crypto";
 import { GET as listGet } from "@/app/api/orders/route";
 import { GET as orderGet, PUT as orderPut } from "@/app/api/orders/[id]/route";
 import { POST as savePost } from "@/app/api/orders/[id]/save/route";
-import type { OrderInput, OrdersListResponse, OrderView, PutOrderResponse, SaveOrderResponse } from "@/contracts/api";
+import { POST as requestPost } from "@/app/api/orders/[id]/request-approval/route";
+import { POST as withdrawPost } from "@/app/api/orders/[id]/withdraw-approval/route";
+import { POST as decisionPost } from "@/app/api/orders/[id]/lines/[lineId]/decision/route";
+import type {
+  LineView,
+  OrderEnvelopeResponse,
+  OrderInput,
+  OrdersListResponse,
+  OrderView,
+  PutOrderResponse,
+  RequestApprovalResponse,
+  SaveOrderResponse,
+} from "@/contracts/api";
 import { DEALER, P } from "./fixtures";
 import { buildRequest, call, type ErrorBody } from "./http";
 
@@ -38,4 +50,39 @@ export async function listOrders(token: string, query = "") {
 
 export async function saveOrder(token: string, id: string, body: unknown) {
   return call<Body<SaveOrderResponse>>(savePost, buildRequest("POST", `/api/orders/${id}/save`, { token, body }), { id });
+}
+
+export async function requestApproval(token: string, id: string, body: unknown) {
+  return call<Body<RequestApprovalResponse>>(
+    requestPost,
+    buildRequest("POST", `/api/orders/${id}/request-approval`, { token, body }),
+    { id },
+  );
+}
+
+export async function withdrawApproval(token: string, id: string) {
+  return call<Body<OrderEnvelopeResponse>>(
+    withdrawPost,
+    buildRequest("POST", `/api/orders/${id}/withdraw-approval`, { token, body: {} }),
+    { id },
+  );
+}
+
+/** Terms as displayed on a LineView (what the owner saw). */
+export function termsOf(line: LineView) {
+  return { productId: line.product.id, qty: line.qty, unitPriceCents: line.unitPriceCents, discountCents: line.discountCents };
+}
+
+export async function decide(
+  token: string,
+  id: string,
+  lineId: string,
+  decision: "approve" | "reject",
+  expectedTerms: ReturnType<typeof termsOf>,
+) {
+  return call<Body<OrderEnvelopeResponse>>(
+    decisionPost,
+    buildRequest("POST", `/api/orders/${id}/lines/${lineId}/decision`, { token, body: { decision, expectedTerms } }),
+    { id, lineId },
+  );
 }

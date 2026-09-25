@@ -72,7 +72,7 @@ already applied and the next cut-lines are in plan.md §12. Status: **READY FOR 
 - **Depends on:** B7
 - **DoD:** AC1 lines 1–2 at 8,200 → 200, totals `{357000, 29274000}`, status `saved`; **AC2**: adviser Bearer, 3 lines incl. 7.25% unapproved → 422 `UNAPPROVED_BLOCKED_LINES`, `details.lineIds = [line3]`, asserted in **two separate cases** (M-5): (a) id never PUT → `orders` row count for that id = 0; (b) id first created as a draft via E9 (as UI autosave would) → row still `status='draft'` with its previous content; both → zero rows with `status='saved'`; same with forged `role:'owner'`, `approval` and `unitPriceCents` fields → still 422; AC4: saved at 8,200 → owner rate 9,000 + price change → GET shows 8,200, original unit prices, same totals; idempotency: identical replay → 200 `replayed:true` (single row); different content → 409 `ORDER_ALREADY_SAVED` with saved order; price changed since client cached it → saved at DB price, `priceChanges` populated; price change that makes a line blocked → 422.
 
-### [ ] B9 — Approval workflow endpoints  `backend`  (R4; AC1-approved path, AC5, AC6)
+### [x] B9 — Approval workflow endpoints  `backend`  (R4; AC1-approved path, AC5, AC6)
 - **Goal:** E11, E12, E13 (plan §6.4).
 - **Files:** `src/server/services/approvals.ts`, `src/app/api/orders/[id]/request-approval/route.ts`, `src/app/api/orders/[id]/withdraw-approval/route.ts`, `src/app/api/orders/[id]/lines/[lineId]/decision/route.ts`, `tests/integration/{approvals,ac6-approval-voiding}.int.test.ts`, extend `ac1-worked-example` and `ac5-roles`.
 - **Depends on:** B8
