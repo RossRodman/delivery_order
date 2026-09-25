@@ -90,7 +90,7 @@ already applied and the next cut-lines are in plan.md §12. Status: **READY FOR 
 - **Depends on:** B10 + stakeholder accounts
 - **DoD:** migrations + seed applied to Supabase via session-pooler `DIRECT_URL`; Vercel env vars set (`DATABASE_URL` transaction pooler, `SESSION_SECRET`); DB client uses `ssl:'require'`, `max:3`, `prepare:false` in production (m-1); `BASE_URL=<prod> scripts/prove-server-refusal.sh` exits 0.
 
-### [ ] B11b — Final redeploy  `backend`
+### [x] B11b — Final redeploy  `backend`
 - **Goal:** deploy the finished app.
 - **Depends on:** B11a, F9
 - **DoD:** prod redeployed; script exits 0 again; login + AC1 flow and one offline save manually verified on prod.
