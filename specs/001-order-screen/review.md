@@ -119,3 +119,62 @@ M-2, M-3 and m-6 easier to fix and test. `tasks.md` has F7/F9 ticked with unimpl
 1. Fix M-1 through M-4, with a test for each (unit for M-1 and M-2; e2e or unit for M-3 and M-4).
 2. m-1 (500 → 400) is a one-liner; m-2 is a one-line trigger change plus a concurrency test. Both recommended.
 3. Complete B12 (README, a spec §9 deliverable) and B11b (redeploy).
+
+---
+
+## Re-review — 2026-09-25 (backend 042efd3, README 111295c, frontend 8b19c57)
+
+### Verdict: **CHANGES REQUESTED** — one new major issue (N-1), caused by the M-1 fix; everything else is fixed
+
+The M-1 fix stops the cross-user save. However, it wipes the previous user's queued offline orders
+on sign-out and on a different-user sign-in. The result is silent loss of unsynced orders, which
+spec §6 forbids ("never silently lost"). This needs a small follow-up. All other findings are
+verified fixed.
+
+### Suite (local, `DATABASE_URL` overridden; nothing run against Supabase or the prod URL)
+
+| Check | Result |
+|---|---|
+| `pnpm typecheck` / `pnpm lint` | clean |
+| `pnpm test` | 102/102 pass |
+| `pnpm test:int` | 88/88 pass |
+| `pnpm build` | pass |
+| `pnpm test:e2e` | 3/3 pass |
+| migration 0002 on local `order_screen` | applied (`order_lines_approval_guard` present) |
+
+### Per-finding status (original reproductions re-run against `next start -p 3020`)
+
+| id | status | evidence |
+|---|---|---|
+| M-1 cross-user replay | **fixed** (the cross-user save), but see **N-1** | Same Playwright flow as before: adviser queues an offline save → session expires → 401 keeps the queue and "Sign in to sync" is shown → owner signs in. The order is **not** saved under Yusuf (0 rows). Outbox and local orders now carry `userId`; `runSync` skips other users' entries. |
+| M-2 crash on price drop | **fixed** | Draft Battery ×1 with discount $1,500; owner lowers the price to $1,000; open `/order` → no page error. The row shows "Invalid" and "Discount ($1,500) exceeds the new line value ($1,000) — reduce the discount or remove this line." Save is disabled. |
+| M-3 local-only orders not listed | **fixed** | An offline order rejected on sync (server has 0 rows) is listed online as "Draft · Rejected — not saved". Offline `/orders` renders from IndexedDB with the "Showing cached orders" banner and no endless skeleton. Note: the offline list holds only orders *viewed* on this device, not every listed order (plan §8.2 says "viewed or listed"). The README describes this correctly. Acceptable. |
+| M-4 price-change notice | **fixed** | Offline save of Battery at the cached $2,070; owner raises it to $2,100; on reconnect a toast reads "Note: the price of Battery changed from $2,070 to $2,100. Totals reflect the new price." `buildInput` now sends `clientUnitPriceCents`. |
+| m-1 case-variant duplicate ids → 500 | **fixed** | Same payload → 400 `VALIDATION_FAILED` "Duplicate line id". |
+| m-2 line-trigger race | **fixed** | Two-session psql race re-run. A line insert during an uncommitted save now waits, then gets `OS409 ORDER_IMMUTABLE` (order stays with 1 line). Reverse order (uncommitted line insert, then save) → the save waits, then gets `OS422 UNAPPROVED_BLOCKED_LINES`. |
+| m-3 SQL self-approval | **fixed** | Approval from `none` → `APPROVAL_REQUIRES_OWNER`. From `pending` with `decided_by` = the adviser → `APPROVAL_REQUIRES_OWNER`. With `decided_by` = an owner the SQL still succeeds. That is inherent: the DB cannot authenticate a raw SQL writer. Acceptable. |
+| m-4 autosave errors swallowed | **fixed** | Owner lowers the price under the draft's discount, then the adviser edits → "Couldn't save — A discount can't exceed its line value." is shown. |
+| m-5 "Sign in to sync" | **fixed** | The prompt appears after the 401 (M-1 flow). |
+| m-6 server copy overwrites local edits | **fixed** | Reopening the rejected order online shows the local edits plus "Couldn't save…" (local copy wins while not `synced`). |
+| m-7 settings rate copy | **fixed** | Owner global rate 7,999 → 422 "Global rate can't be below 8,000 SDG/USD. The current rate was kept." |
+
+### New findings
+
+| id | severity | file:line | problem | reproduction | suggested fix |
+|---|---|---|---|---|---|
+| N-1 | **major** | `src/app/login/page.tsx:33-37` (`clearAll()` when the cached `me` differs); `src/components/TopBar.tsx:22-39` (sign-out `clearAll()` after a confirm) | **Unsynced offline orders are deleted.** (a) Consider a different user signing in on the same device, which happens naturally after the 12 h session expiry. This wipes the previous user's outbox and local orders with no warning. The queued save is lost: it is in neither IndexedDB nor the server. (b) On explicit sign-out with pending entries, the confirm says *"They will not upload until you sign back in as Amina"*, but the code then calls `clearAll()`. After Amina signs back in, the outbox is empty and the order was never saved. The dialog promises the opposite of what happens. This also contradicts `sync.ts`'s own comment that another user's entries are "left untouched … until that user signs back in". | (a) M-1 flow → owner signs in → outbox `[]`, orders `[]` → adviser signs back in → outbox `[]`; `SELECT … WHERE id=<order>` → 0 rows. (b) Adviser queues an offline save → API unreachable → Sign out → the dialog above → Accept → adviser signs in again → outbox `[]`, 0 rows on the server. | The per-user scoping already added (`userId` on entries, filtered `runSync`, `listLocalOrders`, `outboxCount`) makes wiping unnecessary for correctness. On a different-user sign-in, clear only `meta.me` (and optionally the SW caches). Keep other users' `orders`/`outbox` rows: they are already hidden and never replayed. On sign-out, keep this user's pending entries as the dialog promises, or, if wiping for privacy is preferred, change the copy to "…will be **discarded**" and only wipe after that explicit confirmation. Add a unit/e2e test: "user A's queued save survives user B's session and syncs when A signs back in". |
+
+### README check
+
+The README is accurate against the code:
+- The commands and scripts exist (`db:migrate` → `scripts/migrate.ts` using `DIRECT_URL || DATABASE_URL`, `db:reset` guard, `verify`).
+- Port 5434 and the three DBs match.
+- "Copy API token (for curl)" exists on `/login`.
+- The AC2 section matches `ac2-server-refusal.int.test.ts`, `prove-server-refusal.sh` (no jq; steps 3–6) and the 0001/0002 guards.
+- The AC6 15,000 → 15,100 case matches the test.
+- The auth tests cover expired and deleted-user tokens.
+- The offline section says "orders you have viewed", which matches the code.
+
+One note: the README's `.env.production.local` warning is good. Also consider mentioning in the offline section that sign-out wipes local data, once N-1 is resolved.
+
+Local DB note: the probes left extra demo orders in the local `order_screen` DB. The Battery price is back at 207,000. The global rate was found at 8,000 (not changed by these probes) and has been set back to the seed value 8,200.
