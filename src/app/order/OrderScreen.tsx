@@ -68,6 +68,16 @@ export function OrderScreen() {
     );
   }
 
+  // A locally queued save (offline) renders read-only until it syncs or is rejected (m-3).
+  if (order.queued && order.localOrderView) {
+    return (
+      <div className="flex flex-1 flex-col">
+        <TopBar user={me.user} backHref="/orders" title="Order" />
+        <SavedOrderView order={order.localOrderView} queued />
+      </div>
+    );
+  }
+
   const readOnly = !order.canEdit || order.server?.status === "pending_approval";
   const computed = order.computed;
 
@@ -161,15 +171,22 @@ export function OrderScreen() {
         />
       )}
 
+      {!order.isOnline && (
+        <div className="rounded-md border border-offline-500 bg-sand-100 px-4 py-3 text-body text-sand-900">
+          You&apos;re offline. Changes are saved on this device and will sync when you&apos;re back online.
+        </div>
+      )}
+
       {!readOnly && (
         <ActionBar
           canSave={Boolean(computed?.canSave)}
-          canRequestApproval={Boolean(computed && computed.blockingLineIds.length > 0)}
+          canRequestApproval={Boolean(order.isOnline && computed && computed.blockingLineIds.length > 0)}
           isPendingApproval={order.server?.status === "pending_approval"}
+          isOffline={!order.isOnline}
           saving={order.saving}
           onSave={order.save}
           onRequestApproval={order.requestApproval}
-          onWithdraw={order.withdraw}
+          onWithdraw={order.isOnline ? order.withdraw : undefined}
         />
       )}
 

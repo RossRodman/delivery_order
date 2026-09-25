@@ -1,0 +1,9 @@
+{
+  "name": "Order Desk",
+  "short_name": "Order Desk",
+  "start_url": "/orders",
+  "display": "standalone",
+  "background_color": "#F8FAFC",
+  "theme_color": "#1D4ED8",
+  "icons": []
+}

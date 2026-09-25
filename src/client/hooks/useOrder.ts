@@ -3,8 +3,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { computeOrder, type ComputedOrder, type LineApproval } from "@/domain";
 import { api } from "@/client/api";
-import type { Catalog, OrderInput, OrderView, PriceChange } from "@/contracts/api";
+import type { Catalog, LineView, OrderInput, OrderView, PriceChange } from "@/contracts/api";
 import type { ApiError } from "@/client/api";
+import { loadCatalog } from "@/client/offline/catalog";
+import { getLocalOrder, getOutboxEntry, type OutboxIntent } from "@/client/offline/db";
+import { saveLocalInput } from "@/client/offline/orders";
+import { enqueue } from "@/client/offline/outbox";
+import { onSyncChange } from "@/client/offline/sync";
+import { useOnline } from "@/client/offline/useOnline";
 
 export interface EditableLine {
   id: string;
@@ -41,56 +47,138 @@ export function useOrder(orderId: string, meId: string | null) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
   const [priceChanges, setPriceChanges] = useState<PriceChange[]>([]);
+  const [queuedIntent, setQueuedIntent] = useState<OutboxIntent | null>(null);
   const isNewOrderRef = useRef(true);
   const autosaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { isOnline, syncNow } = useOnline();
+
+  const refreshQueuedIntent = useCallback(async () => {
+    const entry = await getOutboxEntry(orderId);
+    setQueuedIntent(entry?.intent ?? null);
+  }, [orderId]);
 
   useEffect(() => {
     let cancelled = false;
     async function load() {
       setLoading(true);
-      const catalogResult = await api.catalog();
+      const catalogData = await loadCatalog();
       if (cancelled) return;
-      if (catalogResult.ok) {
-        setCatalog(catalogResult.data);
-      }
+      if (catalogData) setCatalog(catalogData);
 
       const orderResult = await api.getOrder(orderId);
       if (cancelled) return;
       if (orderResult.ok) {
         isNewOrderRef.current = false;
         applyServerOrder(orderResult.data);
+        await saveLocalInput(orderId, inputFromView(orderResult.data), {
+          server: orderResult.data,
+          syncState: "synced",
+        });
+      } else if (orderResult.error.code === "NETWORK") {
+        // Offline: fall back to whatever we have cached for this order.
+        const local = await getLocalOrder(orderId);
+        if (local) {
+          isNewOrderRef.current = !local.server;
+          applyLocalInput(local.input, local.server ?? undefined);
+        } else if (catalogData) {
+          isNewOrderRef.current = true;
+          setRateState(catalogData.globalRate);
+        }
       } else {
         isNewOrderRef.current = true;
-        if (catalogResult.ok) {
-          setRateState(catalogResult.data.globalRate);
-        }
+        if (catalogData) setRateState(catalogData.globalRate);
       }
+      await refreshQueuedIntent();
       setLoading(false);
     }
     load();
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orderId]);
+
+  useEffect(() => {
+    // The sync engine (F7) runs in the background (online event / app start / manual "Sync
+    // now") and may not be triggered by this component at all. When it finishes a pass, pick up
+    // whatever it decided for this order: synced -> adopt the server snapshot; rejected -> the
+    // order becomes editable again with the error surfaced (never silently dropped).
+    return onSyncChange(() => {
+      refreshQueuedIntent();
+      getLocalOrder(orderId).then((local) => {
+        if (!local) return;
+        if (local.syncState === "synced" && local.server) {
+          applyServerOrder(local.server);
+          setPriceChanges(local.priceChanges);
+        } else if (local.syncState === "rejected") {
+          applyLocalInput(local.input, local.server ?? undefined);
+          setError(local.lastError);
+        }
+      });
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orderId]);
+
+  function inputFromView(view: OrderView): OrderInput {
+    return {
+      dealerId: view.dealer.id,
+      rate: view.rate,
+      lines: view.lines.map((l) => ({ id: l.id, productId: l.product.id, qty: l.qty, discountCents: l.discountCents })),
+    };
+  }
 
   function applyServerOrder(view: OrderView) {
     setServer(view);
     setDealerIdState(view.dealer.id);
     setRateState(view.rate);
+    setLines(view.lines.map(lineFromView));
+  }
+
+  function lineFromView(l: LineView): EditableLine {
+    return {
+      id: l.id,
+      productId: l.product.id,
+      qty: l.qty,
+      discountCents: l.discountCents,
+      approval: {
+        status: l.approval.status,
+        terms:
+          l.approval.status === "approved"
+            ? { productId: l.product.id, qty: l.qty, unitPriceCents: l.unitPriceCents, discountCents: l.discountCents }
+            : null,
+      },
+    };
+  }
+
+  /** Applies a cached OrderInput (offline reopen). `serverSnapshot`, if any, seeds approvals. */
+  function applyLocalInput(input: OrderInput, serverSnapshot?: OrderView) {
+    setServer(serverSnapshot ?? null);
+    setDealerIdState(input.dealerId);
+    setRateState(input.rate);
+    const approvalByLineId = new Map((serverSnapshot?.lines ?? []).map((l) => [l.id, l.approval]));
     setLines(
-      view.lines.map((l) => ({
-        id: l.id,
-        productId: l.product.id,
-        qty: l.qty,
-        discountCents: l.discountCents,
-        approval: {
-          status: l.approval.status,
-          terms:
-            l.approval.status === "approved"
-              ? { productId: l.product.id, qty: l.qty, unitPriceCents: l.unitPriceCents, discountCents: l.discountCents }
-              : null,
-        },
-      })),
+      input.lines.map((l) => {
+        const serverLine = (serverSnapshot?.lines ?? []).find((sl) => sl.id === l.id);
+        const approvalStatus = approvalByLineId.get(l.id)?.status ?? "none";
+        return {
+          id: l.id,
+          productId: l.productId,
+          qty: l.qty,
+          discountCents: l.discountCents,
+          approval:
+            approvalStatus === "approved" && serverLine
+              ? {
+                  status: "approved",
+                  terms: {
+                    productId: serverLine.product.id,
+                    qty: serverLine.qty,
+                    unitPriceCents: serverLine.unitPriceCents,
+                    discountCents: serverLine.discountCents,
+                  },
+                }
+              : { status: "none", terms: null },
+        };
+      }),
     );
   }
 
@@ -123,20 +211,69 @@ export function useOrder(orderId: string, meId: string | null) {
     };
   }, [dealerId, rate, lines]);
 
+  /** A synthetic OrderView for rendering a locally queued (not-yet-synced) save read-only. */
+  const localOrderView = useMemo<OrderView | null>(() => {
+    if (!catalog || !computed) return null;
+    const dealer = catalog.dealers.find((d) => d.id === dealerId);
+    if (!dealer) return null;
+    return {
+      id: orderId,
+      number: server?.number ?? 0,
+      status: "saved",
+      createdBy: server?.createdBy ?? { id: meId ?? "", name: "You" },
+      dealer,
+      rate,
+      lines: lines.map((l, index) => {
+        const product = catalog.products.find((p) => p.id === l.productId);
+        const c = computed.lines[index];
+        return {
+          id: l.id,
+          position: index,
+          product: product ? { id: product.id, sku: product.sku, name: product.name } : { id: l.productId, sku: "", name: "" },
+          qty: l.qty,
+          unitPriceCents: product?.unitPriceCents ?? 0,
+          discountCents: l.discountCents,
+          lineValueCents: c?.lineValueCents ?? 0,
+          lineTotalCents: c?.lineTotalCents ?? 0,
+          discountBasisPoints: c?.discountBasisPoints ?? 0,
+          classification: c?.classification ?? "sand",
+          state: c?.state ?? "sand",
+          approval: { status: l.approval.status, decidedBy: null, decidedAt: null },
+        };
+      }),
+      totals: { usdCents: computed.totalUsdCents, sdg: computed.totalSdg },
+      canSave: computed.canSave,
+      blockingLineIds: computed.blockingLineIds,
+      createdAt: server?.createdAt ?? new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      savedAt: null,
+    };
+  }, [catalog, computed, dealerId, lines, meId, orderId, rate, server]);
+
   const isCreator = server ? server.createdBy.id === meId : true;
   const isMine = !server || isCreator;
-  const canEdit = isMine && (!server || server.status === "draft");
+  const canEdit = isMine && (!server || server.status === "draft") && queuedIntent !== "save";
 
   const runAutosave = useCallback(async () => {
     const input = buildInput();
     if (!input || input.lines.length === 0) return;
+    await saveLocalInput(orderId, input);
+    if (!navigator.onLine) {
+      await enqueue(orderId, "draft", input);
+      await refreshQueuedIntent();
+      return;
+    }
     const result = await api.putOrder(orderId, input);
     if (result.ok) {
       isNewOrderRef.current = false;
       setPriceChanges(result.data.priceChanges);
       setServer((prev) => ({ ...(prev ?? result.data), ...result.data }));
+      await saveLocalInput(orderId, input, { server: result.data, syncState: "synced" });
+    } else if (result.error.code === "NETWORK") {
+      await enqueue(orderId, "draft", input);
+      await refreshQueuedIntent();
     }
-  }, [buildInput, orderId]);
+  }, [buildInput, orderId, refreshQueuedIntent]);
 
   const runAutosaveRef = useRef(runAutosave);
   runAutosaveRef.current = runAutosave;
@@ -211,11 +348,22 @@ export function useOrder(orderId: string, meId: string | null) {
     if (!input) return;
     setSaving(true);
     setError(null);
+    await saveLocalInput(orderId, input);
+    if (!navigator.onLine) {
+      await enqueue(orderId, "save", input);
+      await refreshQueuedIntent();
+      setSaving(false);
+      return;
+    }
     const result = await api.saveOrder(orderId, input);
     setSaving(false);
     if (result.ok) {
       applyServerOrder(result.data.order);
       setPriceChanges(result.data.priceChanges);
+      await saveLocalInput(orderId, input, { server: result.data.order, syncState: "synced" });
+    } else if (result.error.code === "NETWORK") {
+      await enqueue(orderId, "save", input);
+      await refreshQueuedIntent();
     } else {
       setError(result.error);
     }
@@ -223,7 +371,7 @@ export function useOrder(orderId: string, meId: string | null) {
 
   async function requestApproval() {
     const input = buildInput();
-    if (!input) return;
+    if (!input || !isOnline) return;
     setSaving(true);
     setError(null);
     const result = await api.requestApproval(orderId, input);
@@ -237,6 +385,7 @@ export function useOrder(orderId: string, meId: string | null) {
   }
 
   async function withdraw() {
+    if (!isOnline) return;
     setSaving(true);
     const result = await api.withdrawApproval(orderId);
     setSaving(false);
@@ -260,6 +409,9 @@ export function useOrder(orderId: string, meId: string | null) {
     priceChanges,
     isCreator,
     canEdit,
+    isOnline,
+    queued: queuedIntent === "save",
+    localOrderView,
     setDealerId,
     setRate,
     addLine,
@@ -269,6 +421,7 @@ export function useOrder(orderId: string, meId: string | null) {
     save,
     requestApproval,
     withdraw,
+    syncNow,
     clearError: () => setError(null),
   };
 }

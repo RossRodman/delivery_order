@@ -34,7 +34,10 @@ export function PriceEditRow({
   }
 
   return (
-    <div className="flex items-center justify-between border-b border-border-default py-2 last:border-0">
+    <div
+      data-testid={`price-row-${product.sku}`}
+      className="flex items-center justify-between border-b border-border-default py-2 last:border-0"
+    >
       <span className="text-body">{product.name}</span>
       {editing ? (
         <div className="flex items-center gap-2">

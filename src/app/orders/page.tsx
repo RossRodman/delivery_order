@@ -46,10 +46,14 @@ export default function OrdersPage() {
   }
 
   function openOrder(order: OrderSummary) {
+    // A real navigation (not router.push): /order must be fetched as a document at least once
+    // online so the service worker's network-first handler can cache it for offline use.
     if (order.status === "pending_approval" && me.status === "authenticated" && me.user.role === "owner") {
-      router.push(`/approvals/${order.id}`);
+      // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+      window.location.href = `/approvals/${order.id}`;
     } else {
-      router.push(`/order?id=${order.id}`);
+      // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+      window.location.href = `/order?id=${order.id}`;
     }
   }
 
@@ -79,13 +83,12 @@ export default function OrdersPage() {
             </button>
           )}
         </div>
-        <button
-          type="button"
-          onClick={() => router.push(`/order?id=${crypto.randomUUID()}`)}
+        <a
+          href={`/order?id=${crypto.randomUUID()}`}
           className="focus-ring rounded-md bg-brand-600 px-3 py-1.5 text-body text-white"
         >
           + New order
-        </button>
+        </a>
       </div>
       <div className="px-4 pb-4">
         {orders === null ? (
@@ -94,13 +97,12 @@ export default function OrdersPage() {
           <EmptyState
             message="No orders yet."
             action={
-              <button
-                type="button"
-                onClick={() => router.push(`/order?id=${crypto.randomUUID()}`)}
+              <a
+                href={`/order?id=${crypto.randomUUID()}`}
                 className="focus-ring rounded-md bg-brand-600 px-3 py-1.5 text-body text-white"
               >
                 + New order
-              </button>
+              </a>
             }
           />
         ) : (

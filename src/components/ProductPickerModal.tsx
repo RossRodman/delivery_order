@@ -26,6 +26,7 @@ export function ProductPickerModal({
         <h2 className="text-h2 mb-4">Add product</h2>
         <select
           autoFocus
+          aria-label="Select a product"
           className="focus-ring mb-4 w-full rounded-md border border-border-default px-2 py-1.5 text-body"
           value={selected}
           onChange={(e) => setSelected(e.target.value)}

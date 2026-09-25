@@ -6,6 +6,7 @@ import { api } from "@/client/api";
 import type { Role } from "@/contracts/api";
 import { RoleLoginCard } from "@/components/RoleLoginCard";
 import { useToast } from "@/components/Toast";
+import { setCachedMe } from "@/client/offline/db";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -24,6 +25,7 @@ export default function LoginPage() {
       return;
     }
     setLastToken(result.data.token);
+    await setCachedMe(result.data.user);
     router.push("/orders");
   }
 

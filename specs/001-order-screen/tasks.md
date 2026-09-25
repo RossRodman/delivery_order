@@ -141,25 +141,25 @@ already applied and the next cut-lines are in plan.md §12. Status: **READY FOR 
 - **Depends on:** F2
 - **DoD:** shows order number, saved date, snapshot rate with lock tooltip, stored unit prices and `totals` from the server (never recomputed from current catalog); approved badges persist; no editable controls.
 
-### [ ] F7 — Offline data layer and sync engine  `frontend`  (spec §6; AC7)
+### [x] F7 — Offline data layer and sync engine  `frontend`  (spec §6; AC7)
 - **Goal:** plan.md §8.2–8.3.
 - **Files:** `src/client/offline/{db,catalog,orders,outbox,sync,useOnline}.ts`, `src/client/offline/{outbox,sync}.test.ts` (fake-indexeddb), wire into `useOrder`, `OnlineOfflineIndicator`, orders list merge of local-only orders.
 - **Depends on:** F2, F3
 - **DoD:** unit tests: outbox coalescing (latest payload wins, `save` not downgraded), sync 200 → synced + removed, 409 `ORDER_ALREADY_SAVED` → synced, 422 → `rejected` with `lastError` and order kept, 401 → queue kept + stop, network/5xx → kept, run stops; sync triggers only `online` event, app start and manual "Sync now" (no timer / visibilitychange / cross-tab locks, B-3); an order with outbox intent `save` renders read-only as `SavedOrderView` with a "Queued" tag until synced or rejected, and becomes editable again on rejection (m-3); offline Save button reads "Save (offline)" and enqueues; top bar shows "N pending sync"; offline banner copy from design.md; price-change notice shown once from `priceChanges`; request-approval/owner actions disabled offline.
 
-### [ ] F8 — Service worker  `frontend`  (spec §6)
+### [x] F8 — Service worker  `frontend`  (spec §6)
 - **Goal:** plan.md §8.1.
 - **Files:** `public/sw.js`, `public/manifest.webmanifest`, `src/app/sw-register.tsx` (production only, `?v=NEXT_PUBLIC_BUILD_ID`).
 - **Depends on:** F7
 - **DoD:** SW registered only after `GET /api/me` returns 200 (never on `/login` before sign-in); no install-time precache/HTML parsing; navigation responses cached only when `ok && !redirected && type==='basic'` (B-2); in `pnpm build && pnpm start`: **after one online visit of `/orders` and `/order`, both reload offline** and render with catalog from IndexedDB; a logged-out visit never puts the login page into the `/order` cache entry; new build id replaces old caches; `/api/*` never served from SW cache (verified in F10 test by asserting API requests fail offline, not stale-succeed).
 
-### [ ] F9 — Offline integration polish  `frontend`  (AC7)
+### [x] F9 — Offline integration polish  `frontend`  (AC7)
 - **Goal:** end-to-end offline behaviour on real screens: create/edit order offline, "Queued" tag, sync on reconnect, rejected-order display with line errors, "Sign in to sync" on 401.
 - **Files:** components touched in F2/F3/F7 only.
 - **Depends on:** F8, B8
 - **DoD:** manual run-through documented in the PR/summary + F10 AC7 spec green.
 
-### [ ] F10 — E2E suite  `frontend`  (AC1, AC7)
+### [x] F10 — E2E suite  `frontend`  (AC1, AC7)
 - **Goal:** two Playwright specs from plan.md §9.1 against the production build (AC3–AC6 are covered by integration/unit tests — B-3).
 - **Files:** `playwright.config.ts` (webServer `pnpm build && pnpm start -p 3100`, env `DATABASE_URL=…/order_screen_e2e`), `tests/e2e/global-setup.ts` (db reset + seed), `tests/e2e/{ac1-worked-example,ac7-offline}.spec.ts`, `tests/e2e/helpers.ts` (login as role, add line).
 - **Depends on:** F2–F9, B9

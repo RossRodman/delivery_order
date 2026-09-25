@@ -64,7 +64,9 @@ export function SavedOrderView({ order, queued }: { order: OrderView; queued?: b
         </div>
         <div className="flex w-64 justify-between">
           <span className="text-text-secondary">Order total (SDG)</span>
-          <span className="tabular-nums text-mono-num">{formatSdg(order.totals.sdg)}</span>
+          <span className="tabular-nums text-mono-num" data-testid="totals-sdg">
+            {formatSdg(order.totals.sdg)}
+          </span>
         </div>
       </div>
     </div>
