@@ -1,3 +1,85 @@
 @import "tailwindcss";
 
-/* Design tokens (@theme) are added by the frontend track (F1). */
+/* Design tokens (design.md §1) — Tailwind v4 CSS-first theme. */
+@theme {
+  --color-sand-50: #fefaf3;
+  --color-sand-100: #fdf3e1;
+  --color-sand-300: #efc876;
+  --color-sand-500: #d9a441;
+  --color-sand-700: #9c6b12;
+  --color-sand-900: #7a4e00;
+
+  --color-danger-50: #fef2f2;
+  --color-danger-100: #fdecec;
+  --color-danger-300: #f3a7a5;
+  --color-danger-500: #e0403d;
+  --color-danger-700: #b02322;
+  --color-danger-900: #8a1f1f;
+
+  --color-blocked-50: #f9fafb;
+  --color-blocked-100: #f3f4f6;
+  --color-blocked-300: #d1d5db;
+  --color-blocked-500: #9ca3af;
+  --color-blocked-700: #52525b;
+  --color-blocked-900: #3f3f46;
+
+  --color-approved-50: #f0fbf4;
+  --color-approved-100: #eaf6ee;
+  --color-approved-300: #86efac;
+  --color-approved-500: #22c55e;
+  --color-approved-700: #15803d;
+  --color-approved-900: #166534;
+
+  --color-brand-50: #eff6ff;
+  --color-brand-500: #2563eb;
+  --color-brand-600: #1d4ed8;
+  --color-brand-700: #1e40af;
+
+  --color-bg-canvas: #f8fafc;
+  --color-bg-surface: #ffffff;
+  --color-border-default: #e2e8f0;
+  --color-text-primary: #0f172a;
+  --color-text-secondary: #64748b;
+  --color-success-600: #15803d;
+  --color-offline-500: #f59e0b;
+}
+
+body {
+  background-color: var(--color-bg-canvas);
+  color: var(--color-text-primary);
+}
+
+.tabular-nums {
+  font-feature-settings: "tnum";
+  font-variant-numeric: tabular-nums;
+}
+
+.text-display {
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.text-h2 {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.text-body {
+  font-size: 14px;
+  font-weight: 400;
+}
+
+.text-small {
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.text-mono-num {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.focus-ring:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--color-brand-600);
+}

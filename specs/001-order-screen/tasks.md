@@ -105,37 +105,37 @@ already applied and the next cut-lines are in plan.md §12. Status: **READY FOR 
 
 ## Frontend
 
-### [ ] F1 — App shell, tokens, API client, login  `frontend`  (spec §2; design §1, §3.1)
+### [x] F1 — App shell, tokens, API client, login  `frontend`  (spec §2; design §1, §3.1)
 - **Goal:** design tokens in Tailwind `@theme`, global layout/top bar, typed API client, login screen.
 - **Files:** `src/app/globals.css` (tokens from design.md §1), `src/app/layout.tsx`, `src/components/{TopBar,OnlineOfflineIndicator(stub),Toast,EmptyState,Skeleton,DiscountStateBadge,OrderStatusChip,RoleLoginCard}.tsx`, `src/client/api.ts`, `src/client/hooks/useMe.ts`, `src/app/login/page.tsx`, `src/client/api.test.ts`.
 - **Depends on:** B0, B2
 - **DoD:** login posts E1 and redirects to `/orders`; "Copy API token (for curl)" copies the returned token; `api.ts` test maps network error → `NETWORK`, 422 envelope → typed error; `DiscountStateBadge` renders icon + label for sand/red/blocked/approved/rejected (not colour alone); **blocked = lucide `Lock` icon + "Blocked" on a grey badge, row gets a dashed `danger-500` border** (M-2); tokens defined via Tailwind v4 `@theme` (no `tailwind.config.ts`); owner-only nav items hidden for adviser.
 
-### [ ] F2 — Order screen (online)  `frontend`  (R1–R6, R8; AC1, AC3, AC6 UI)
+### [x] F2 — Order screen (online)  `frontend`  (R1–R6, R8; AC1, AC3, AC6 UI)
 - **Goal:** design.md §3.2 + §4 using `computeOrder`/`format*` from `src/domain` only.
 - **Files:** `src/app/order/page.tsx`, `src/client/hooks/useOrder.ts`, `src/components/{DealerPicker,ProductPickerModal,RateInput,OrderLinesTable,OrderLineCard,TotalsPanel,ActionBar,ErrorBanner}.tsx`, `src/components/RateInput.test.tsx`. (No mobile `OrderLineCard`: responsive table with horizontal scroll; dealer/product pickers are plain `<select>`; no Cmd+S / "A" shortcut / Undo toast — B-3.)
 - **Depends on:** F1, B1, B2
 - **DoD:** new order gets `crypto.randomUUID()` id and catalog `globalRate` prefill; unit price read-only; discount input accepts **up to 2 decimals** (`40`, `40.5`, `1,550.50`) → cents via `parseUsdToCents`; `4.555` / non-numeric → "Enter a dollar amount with up to 2 decimals." (B-1); clamp to line value on blur with design copy; rate `< 8000` on blur/Enter → 8,000 + message (component test); worked-example numbers (`1.94%`/`OK`, `4.32%`/`Warning`, `7.25%`/`Blocked`, `$5,490`, `45,018,000 SDG`, Save disabled with tooltip) verified in the F10 AC1 e2e; debounced PUT autosave (not when pending/saved); Save → E10, Request approval → E11, Cancel request → E12; server `details.lineIds` outline rows; `RATE_BELOW_MINIMUM` banner refocuses rate; read-only rendering (no inputs, no Save/Request) when the order is `pending_approval`, or the viewer is not the creator (m-6); owner opening a pending order is routed to `/approvals/[id]`; saved status renders `SavedOrderView` (F6). "Cancel request" link (E12) is a cut-line if late.
 
-### [ ] F3 — Orders list  `frontend`  (spec §5.3)
+### [x] F3 — Orders list  `frontend`  (spec §5.3)
 - **Goal:** design.md §3.3 via E7.
 - **Files:** `src/app/orders/page.tsx`, `src/components/OrdersTable.tsx`.
 - **Depends on:** F1
 - **DoD:** adviser list; owner sees all + "Awaiting approval (N)" filter chip using `counts.pendingApproval`; row click → `/order?id=` (or `/approvals/[id]` for owner on pending orders); empty state; "New order" button; statuses via `OrderStatusChip` incl. rejected marker from `hasRejectedLines`.
 
-### [ ] F4 — Approval view (owner)  `frontend`  (R4; AC1 approved path, AC6)
+### [x] F4 — Approval view (owner)  `frontend`  (R4; AC1 approved path, AC6)
 - **Goal:** design.md §3.4 via E8 + E13.
 - **Files:** `src/app/approvals/[id]/page.tsx`, `src/components/ApprovalLineCard.tsx`.
 - **Depends on:** F2 (shared line components)
 - **DoD:** only lines with `approval.status='pending'` get Approve/Reject; decision sends `expectedTerms` from the displayed line; 409 `LINE_TERMS_CHANGED` → error toast + reload of the order (no extra flow, m-7); reject requires inline confirm; when the order returns to draft (automatic after the last decision; no "Return to adviser" button, m-5) shows "All lines decided — returned to {adviser}" + back link; "Nothing pending on this order." state.
 
-### [ ] F5 — Owner settings  `frontend`  (R5, R6; AC3, AC5)
+### [x] F5 — Owner settings  `frontend`  (R5, R6; AC3, AC5)
 - **Goal:** design.md §3.5 via E4, E5, E6.
 - **Files:** `src/app/settings/page.tsx`, `src/components/PriceEditRow.tsx`.
 - **Depends on:** F2 (reuses `RateInput`)
 - **DoD:** global rate uses `RateInput` reset behaviour; inline price edit (dollars with up to 2 decimals → cents via `parseUsdToCents`, B-1); success toasts; adviser direct URL shows full-page 403 state; catalog cache in IndexedDB refreshed after edits (once F7 exists; before that, no-op hook).
 
-### [ ] F6 — Saved order view  `frontend`  (R7; AC4)
+### [x] F6 — Saved order view  `frontend`  (R7; AC4)
 - **Goal:** design.md §3.6 — read-only component rendered by `/order` for `status==='saved'`.
 - **Files:** `src/components/SavedOrderView.tsx`, `src/components/LockedFieldTooltip.tsx`.
 - **Depends on:** F2
