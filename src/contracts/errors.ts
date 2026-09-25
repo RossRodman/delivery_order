@@ -77,6 +77,13 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   INTERNAL: "Something went wrong. Please try again.",
 };
 
+/**
+ * E6 overrides the message of RATE_BELOW_MINIMUM (same code, per the contract) with settings copy
+ * (review m-7). Additive export so the settings screen can reuse it.
+ */
+export const GLOBAL_RATE_BELOW_MINIMUM_MESSAGE =
+  "Global rate can't be below 8,000 SDG/USD. The current rate was kept.";
+
 export interface ApiErrorBody {
   code: ErrorCode;
   message: string;

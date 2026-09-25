@@ -69,6 +69,15 @@ describe("OrderInputSchema", () => {
     expect(result.error?.issues[0].message).toBe("Duplicate line id");
   });
 
+  it("rejects duplicate line ids that differ only in case and lower-cases ids (review m-1)", () => {
+    const id = "abcdef00-0000-4000-8000-000000000001";
+    const dup = OrderInputSchema.safeParse(order({ lines: [line(1, { id }), line(2, { id: id.toUpperCase() })] }));
+    expect(dup.success).toBe(false);
+    const ok = OrderInputSchema.parse(order({ dealerId: uuid(1).toUpperCase(), lines: [line(1, { id: id.toUpperCase() })] }));
+    expect(ok.lines[0].id).toBe(id);
+    expect(ok.dealerId).toBe(uuid(1));
+  });
+
   it("rejects bad uuids", () => {
     expect(OrderInputSchema.safeParse(order({ dealerId: "nope" })).success).toBe(false);
     expect(OrderInputSchema.safeParse(order({ lines: [line(1, { productId: "x" })] })).success).toBe(false);

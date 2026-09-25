@@ -3,7 +3,7 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { closeTestDb, resetAndSeed, testDb } from "../helpers/db";
 import { AMINA, P, YUSUF } from "../helpers/fixtures";
 import { adviserToken, ownerToken, tokenFor } from "../helpers/http";
-import { ac1Lines, getOrder, listOrders, orderInput, putOrder } from "../helpers/orders";
+import { ac1Lines, getOrder, listOrders, orderInput, putOrder, saveOrder } from "../helpers/orders";
 
 const { sql } = testDb();
 
@@ -125,6 +125,38 @@ describe("E9 PUT /api/orders/:id — drafts", () => {
     expect(res.body.error).toMatchObject({ code: "DISCOUNT_EXCEEDS_LINE_VALUE", details: { lineIds: [a.id, b.id] } });
   });
 
+  it("duplicate line ids differing only in case → 400, not 500 (review m-1)", async () => {
+    const token = await adviserToken();
+    const { line1 } = ac1Lines();
+    const res = await putOrder(token, randomUUID(), orderInput([line1, { ...line1, id: line1.id.toUpperCase() }]));
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe("VALIDATION_FAILED");
+  });
+
+  it("owner lowers a price below an existing draft's discount: GET 200, PUT/save 422 flag the line, never 500 (review M-2)", async () => {
+    const token = await adviserToken();
+    const id = randomUUID();
+    const line = { id: randomUUID(), productId: P.battery.id, qty: 1, discountCents: 150_000 };
+    expect((await putOrder(token, id, orderInput([ac1Lines().line1, line]))).status).toBe(200);
+    await sql`UPDATE products SET unit_price_cents = 100000 WHERE id = ${P.battery.id}`;
+
+    const read = await getOrder(token, id);
+    expect(read.status).toBe(200);
+    expect(read.body.lines[1]).toMatchObject({ id: line.id, unitPriceCents: 207000, discountCents: 150_000, state: "blocked" });
+
+    const put = await putOrder(token, id, orderInput([ac1Lines().line1, { ...line, clientUnitPriceCents: 207000 }]));
+    expect(put.status).toBe(422);
+    expect(put.body.error).toMatchObject({ code: "DISCOUNT_EXCEEDS_LINE_VALUE", details: { lineIds: [line.id] } });
+    const save = await saveOrder(token, id, orderInput([line]));
+    expect(save.status).toBe(422);
+    expect(save.body.error.code).toBe("DISCOUNT_EXCEEDS_LINE_VALUE");
+
+    // Fixing the discount makes the draft usable again at the new price.
+    const fixed = await putOrder(token, id, orderInput([{ ...line, discountCents: 1_000 }]));
+    expect(fixed.status).toBe(200);
+    expect(fixed.body.lines[0]).toMatchObject({ unitPriceCents: 100000, lineTotalCents: 99_000 });
+  });
+
   it("validation failures → 400 (qty 0, duplicate ids, bad uuid in path → 404)", async () => {
     const token = await adviserToken();
     const { line1 } = ac1Lines();
@@ -138,6 +170,7 @@ describe("E9 PUT /api/orders/:id — drafts", () => {
     const id = randomUUID();
     const { line1, line3 } = ac1Lines();
     await putOrder(token, id, orderInput([line1, line3]));
+    await sql`UPDATE order_lines SET approval_status = 'pending' WHERE id = ${line3.id}`;
     await sql`UPDATE order_lines SET approval_status = 'approved', approved_product_id = product_id, approved_qty = qty,
                 approved_unit_price_cents = unit_price_cents, approved_discount_cents = discount_cents,
                 decided_by = ${YUSUF.id}, decided_at = now() WHERE id = ${line3.id}`;

@@ -4,6 +4,7 @@ import { GET as catalogGet } from "@/app/api/catalog/route";
 import { PATCH as pricePatch } from "@/app/api/products/[id]/route";
 import { PUT as ratePut } from "@/app/api/settings/global-rate/route";
 import type { Catalog, GlobalRateResponse, PriceResponse } from "@/contracts/api";
+import { GLOBAL_RATE_BELOW_MINIMUM_MESSAGE } from "@/contracts/errors";
 import { closeTestDb, resetAndSeed, testDb } from "../helpers/db";
 import { P } from "../helpers/fixtures";
 import { adviserToken, buildRequest, call, ownerToken, type ErrorBody } from "../helpers/http";
@@ -82,6 +83,9 @@ describe("E6 global rate (owner)", () => {
     const res = await putRate(token, 7999);
     expect(res.status).toBe(422);
     expect(res.body.error).toMatchObject({ code: "RATE_BELOW_MINIMUM", details: { min: 8000 } });
+    // Settings copy, not the order-screen copy (review m-7).
+    expect(res.body.error.message).toBe(GLOBAL_RATE_BELOW_MINIMUM_MESSAGE);
+    expect(res.body.error.message).not.toMatch(/order/i);
     const [row] = await testDb().sql`SELECT global_rate FROM app_settings`;
     expect(row.global_rate).toBe(8200);
   });

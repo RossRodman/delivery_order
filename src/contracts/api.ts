@@ -8,7 +8,8 @@ import { MAX_LINES, MAX_QTY, MAX_UNIT_PRICE_CENTS } from "@/domain/limits";
 
 const MAX_DISCOUNT_CENTS = MAX_QTY * MAX_UNIT_PRICE_CENTS;
 
-export const Uuid = z.uuid();
+/** UUID, normalised to lower case (so e.g. duplicate-id checks are case-insensitive, review m-1). */
+export const Uuid = z.uuid().transform((s) => s.toLowerCase());
 
 // ---------- Requests ----------
 
